@@ -1,0 +1,343 @@
+package orm_go
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+)
+
+type SelectStmt struct {
+	scope *ModelScope
+	ctx   context.Context
+	where Expr
+	pagination
+}
+type pagination struct {
+	limit  *int
+	offset *int
+}
+
+type Select interface {
+	AutoTableName() *SelectStmt
+	Table(tableName string) *SelectStmt
+	Columns(cols ...string) *SelectStmt
+	One(dest any) error
+	Many(dest any) error
+	Where(expr Expr) *SelectStmt
+	Limit(limit int) *SelectStmt
+	Offset(offset int) *SelectStmt
+	build() (string, []any, error)
+}
+
+var _ Select = (*SelectStmt)(nil)
+
+func (ss *SelectStmt) AutoTableName() *SelectStmt {
+	if ss.scope != nil {
+		ss.scope.table = ParseTableName(ss.scope.input)
+	}
+	return ss
+}
+
+func (ss *SelectStmt) Table(tableName string) *SelectStmt {
+	if ss.scope != nil {
+		ss.scope.table = tableName
+	}
+
+	return ss
+}
+func (ss *SelectStmt) Columns(cols ...string) *SelectStmt {
+	ss.scope.columns = append([]string(nil), cols...)
+	return ss
+}
+
+func (ss *SelectStmt) Where(expr Expr) *SelectStmt {
+	fmt.Println("<<< ", ss)
+	ss.where = expr
+	return ss
+}
+
+var (
+	ErrNotFound     = errors.New("orm: no rows found")
+	ErrMultipleRows = errors.New("orm: more than one row returned. For multiple rows, use Many()")
+)
+
+func (ss *SelectStmt) One(dest any) error {
+	if ss.ctx == nil {
+		ss.ctx = context.Background()
+	}
+
+	if err := ss.scope.validate(); err != nil {
+		return err
+	}
+
+	destVal, destType, err := validateOneDest(dest)
+	if err != nil {
+		return err
+	}
+	if len(ss.scope.columns) == 0 {
+		ss.scope.columns = columnsFromType(destType)
+		if len(ss.scope.columns) == 0 {
+			return errors.New("orm: no columns to select")
+		}
+	}
+
+	query, args, err := ss.build()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("FINAL SELECT QUERY:", query)
+	fmt.Println("FINAL SELECT ARGS:", args)
+	fmt.Println(">>>>>>>>>>>>> ", ss)
+
+	meta := buildModelMeta(destType)
+	scanArgs, err := scanArgsForColumns(destVal, ss.scope.columns, meta)
+	if err != nil {
+		return err
+	}
+
+	rows, err := ss.scope.pool.Query(ss.ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	// No rows
+	if !rows.Next() {
+		return ErrNotFound
+	}
+
+	// Scan first row
+	if err := rows.Scan(scanArgs...); err != nil {
+		return err
+	}
+
+	// Second row exists → error
+	if rows.Next() {
+		return ErrMultipleRows
+	}
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ss *SelectStmt) Many(dest any) error {
+	if ss.ctx == nil {
+		ss.ctx = context.Background()
+	}
+
+	if err := ss.scope.validate(); err != nil {
+		return err
+	}
+
+	sliceVal, elemType, elemIsPtr, err := validateManyDest(dest)
+	if err != nil {
+		return err
+	}
+	if len(ss.scope.columns) == 0 {
+		ss.scope.columns = columnsFromType(elemType)
+		if len(ss.scope.columns) == 0 {
+			return errors.New("orm: no columns to select")
+		}
+	}
+
+	query, args, err := ss.build()
+	if err != nil {
+		return err
+	}
+	fmt.Println("FINAL SELECT QUERY:", query)
+	fmt.Println("FINAL SELECT ARGS:", args)
+	fmt.Println(">>>>>>>>>>>>> ", ss.scope.columns)
+
+	rows, err := ss.scope.pool.Query(ss.ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	meta := buildModelMeta(elemType)
+
+	for rows.Next() {
+		var elem reflect.Value
+		if elemIsPtr {
+			elem = reflect.New(elemType)
+		} else {
+			elem = reflect.New(elemType).Elem()
+		}
+		target := elem
+		if elemIsPtr {
+			target = elem.Elem()
+		}
+
+		scanArgs, err := scanArgsForColumns(target, ss.scope.columns, meta)
+		if err != nil {
+			return err
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return err
+		}
+
+		if elemIsPtr {
+			sliceVal.Set(reflect.Append(sliceVal, elem))
+		} else {
+			sliceVal.Set(reflect.Append(sliceVal, target))
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ss *SelectStmt) Limit(limit int) *SelectStmt {
+	ss.limit = &limit
+	return ss
+}
+
+func (ss *SelectStmt) Offset(offset int) *SelectStmt {
+	ss.offset = &offset
+	return ss
+}
+
+/*
+SELECT * FROM users WHERE id = 12;
+
+SELECT id, name FROM users WHERE id = 12;
+*/
+func (ss *SelectStmt) build() (string, []any, error) {
+	if ss.ctx == nil {
+		ss.ctx = context.Background()
+	}
+
+	if err := ss.scope.validate(); err != nil {
+		return "", nil, err
+	}
+
+	sb := &sqlBuilder{}
+	sb.sql.WriteString("SELECT ")
+
+	if len(ss.scope.columns) == 0 {
+		sb.sql.WriteString("*")
+	} else {
+		for i, col := range ss.scope.columns {
+			if i > 0 {
+				sb.sql.WriteString(", ")
+			}
+			sb.sql.WriteString(col)
+		}
+	}
+
+	sb.sql.WriteString(" FROM ")
+	sb.sql.WriteString(ss.scope.table)
+
+	if ss.where != nil {
+		sb.sql.WriteString(" WHERE ")
+		ss.where.build(sb)
+	}
+
+	if ss.limit != nil {
+		sb.sql.WriteString(" LIMIT ")
+		sb.sql.WriteString(sb.Arg(ss.limit))
+	}
+	if ss.offset != nil {
+		sb.sql.WriteString(" OFFSET ")
+		sb.sql.WriteString(sb.Arg(ss.offset))
+	}
+
+	return sb.sql.String(), sb.args, nil
+}
+
+func validateOneDest(dest any) (reflect.Value, reflect.Type, error) {
+	if dest == nil {
+		return reflect.Value{}, nil, errors.New("dest must be a non-nil pointer to struct")
+	}
+
+	v := reflect.ValueOf(dest)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return reflect.Value{}, nil, errors.New("dest must be a non-nil pointer to struct")
+	}
+
+	v = v.Elem()
+	if v.Kind() != reflect.Struct {
+		return reflect.Value{}, nil, errors.New("dest must be a pointer to struct")
+	}
+
+	return v, v.Type(), nil
+}
+
+func validateManyDest(dest any) (reflect.Value, reflect.Type, bool, error) {
+	v := reflect.ValueOf(dest)
+	if v.Kind() != reflect.Ptr || v.IsNil() {
+		return reflect.Value{}, nil, false, errors.New("dest must be a pointer to slice")
+	}
+
+	v = v.Elem()
+	if v.Kind() != reflect.Slice {
+		return reflect.Value{}, nil, false, errors.New("dest must be a pointer to slice")
+	}
+
+	elemType := v.Type().Elem()
+	elemIsPtr := false
+	if elemType.Kind() == reflect.Ptr {
+		elemIsPtr = true
+		elemType = elemType.Elem()
+	}
+	if elemType.Kind() != reflect.Struct {
+		return reflect.Value{}, nil, false, errors.New("dest must be a pointer to slice of structs")
+	}
+
+	return v, elemType, elemIsPtr, nil
+}
+
+func columnsFromType(t reflect.Type) []string {
+	for t != nil && t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t == nil || t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	cols := make([]string, 0, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		sf := t.Field(i)
+		if sf.PkgPath != "" {
+			continue
+		}
+		raw := sf.Tag.Get(TagKey)
+		if raw == "" {
+			continue
+		}
+		col := strings.Split(raw, ",")[0]
+		if col == "" {
+			continue
+		}
+		cols = append(cols, col)
+	}
+	return cols
+}
+
+func scanArgsForColumns(v reflect.Value, columns []string, meta *modelMeta) ([]any, error) {
+	scanArgs := make([]any, 0, len(columns))
+	for _, col := range columns {
+		fm, ok := meta.byColumn[col]
+		if !ok {
+			return nil, fmt.Errorf("unknown column: %s", col)
+		}
+
+		field := v.Field(fm.index)
+		if !field.CanAddr() {
+			return nil, fmt.Errorf("field %s is not addressable", col)
+		}
+
+		scanArgs = append(scanArgs, field.Addr().Interface())
+	}
+	return scanArgs, nil
+}

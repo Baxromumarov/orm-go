@@ -75,6 +75,15 @@ func (s *InsertStmt) Exec() error {
 		s.ctx = context.Background()
 	}
 
+	if s.scope != nil {
+		if s.scope.table == "" {
+			s.scope.table = ParseTableName(s.scope.input)
+		}
+		if len(s.scope.columns) == 0 && s.scope.input != nil {
+			s.scope.columns, s.scope.values = ParseInsertColumns(s.scope.input)
+		}
+	}
+
 	if err := s.scope.validate(); err != nil {
 		return err
 	}
@@ -169,24 +178,43 @@ func (s *InsertStmt) build() (string, error) {
 }
 
 func buildModelMeta(model any) *modelMeta {
-	t := reflect.TypeOf(model)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-
 	meta := &modelMeta{
 		byColumn: make(map[string]fieldMeta),
 	}
 
+	var t reflect.Type
+	switch v := model.(type) {
+	case reflect.Type:
+		t = v
+	default:
+		if model == nil {
+			return meta
+		}
+		t = reflect.TypeOf(model)
+	}
+
+	// unwrap pointers
+	for t != nil && t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	if t == nil || t.Kind() != reflect.Struct {
+		return meta
+	}
+
 	for i := 0; i < t.NumField(); i++ {
 		sf := t.Field(i)
-		tag := sf.Tag.Get(TagKey)
-		if tag == "" {
+
+		raw := sf.Tag.Get(TagKey)
+		if raw == "" {
 			continue
 		}
-		meta.byColumn[tag] = fieldMeta{
+
+		col := strings.Split(raw, ",")[0]
+
+		meta.byColumn[col] = fieldMeta{
 			index:  i,
-			column: tag,
+			column: col,
 		}
 	}
 

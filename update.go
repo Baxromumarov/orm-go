@@ -56,6 +56,15 @@ func (s *UpdateStmt) Exec() error {
 		s.ctx = context.Background()
 	}
 
+	if s.scope != nil {
+		if s.scope.table == "" {
+			s.scope.table = ParseTableName(s.scope.input)
+		}
+		if len(s.sets) == 0 && len(s.scope.columns) == 0 && s.scope.input != nil {
+			s.scope.columns, s.scope.values = ParseInsertColumns(s.scope.input)
+		}
+	}
+
 	if err := s.scope.validate(); err != nil {
 		return err
 	}

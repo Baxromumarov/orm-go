@@ -159,7 +159,8 @@ func TestUpdateStmtExecNoColumns(t *testing.T) {
 	stmt := &UpdateStmt{scope: scope}
 	stmt.Where(Eq("id", 1))
 
-	if err := stmt.Exec(); err == nil || !errors.Is(err, ErrNoInsertCols) {
+	err := stmt.Exec()
+	if err == nil || !strings.Contains(err.Error(), "error building update query") || !strings.Contains(err.Error(), "no columns to update") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

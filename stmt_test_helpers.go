@@ -40,6 +40,13 @@ type stubPool struct {
 	queryRowArgs  []any
 	row           pgx.Row
 
+	queryQuery string
+	queryArgs  []any
+	rows       pgx.Rows
+	queryErr   error
+
+	batchResults pgx.BatchResults
+
 	lastCtx context.Context
 }
 
@@ -59,6 +66,48 @@ func (p *stubPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 	}
 	return stubRow{}
 }
+
+func (p *stubPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	p.lastCtx = ctx
+	p.queryQuery = sql
+	p.queryArgs = append([]any(nil), args...)
+	if p.queryErr != nil {
+		return nil, p.queryErr
+	}
+	if p.rows != nil {
+		return p.rows, nil
+	}
+	return &stubRows{}, nil
+}
+
+func (p *stubPool) SendBatch(ctx context.Context, _ *pgx.Batch) pgx.BatchResults {
+	p.lastCtx = ctx
+	if p.batchResults != nil {
+		return p.batchResults
+	}
+	return &stubBatchResults{}
+}
+
+type stubRows struct{}
+
+func (r *stubRows) Close()                        {}
+func (r *stubRows) Err() error                    { return nil }
+func (r *stubRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+func (r *stubRows) FieldDescriptions() []pgconn.FieldDescription {
+	return nil
+}
+func (r *stubRows) Next() bool             { return false }
+func (r *stubRows) Scan(_ ...any) error    { return nil }
+func (r *stubRows) Values() ([]any, error) { return nil, nil }
+func (r *stubRows) RawValues() [][]byte    { return nil }
+func (r *stubRows) Conn() *pgx.Conn        { return nil }
+
+type stubBatchResults struct{}
+
+func (b *stubBatchResults) Exec() (pgconn.CommandTag, error) { return pgconn.CommandTag{}, nil }
+func (b *stubBatchResults) Query() (pgx.Rows, error)         { return &stubRows{}, nil }
+func (b *stubBatchResults) QueryRow() pgx.Row                { return stubRow{} }
+func (b *stubBatchResults) Close() error                     { return nil }
 
 type User struct {
 	ID   int    `orm:"id"`

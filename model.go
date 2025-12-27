@@ -14,18 +14,14 @@ type ModelScope struct {
 }
 
 func (db *DB) Model(model any) *ModelScope {
-	cols, vals := ParseInsertColumns(model)
-
 	var pool pooler
 	if db.conn != nil {
 		pool = db.conn
 	}
 
 	return &ModelScope{
-		pool:    pool,
-		input:   model,
-		columns: cols,
-		values:  vals,
+		pool:  pool,
+		input: model,
 	}
 }
 
@@ -37,6 +33,9 @@ func (m *ModelScope) Update(ctx context.Context) *UpdateStmt {
 }
 func (m *ModelScope) Delete(ctx context.Context) *DeleteStmt {
 	return &DeleteStmt{scope: m, ctx: ctx}
+}
+func (m *ModelScope) Select(ctx context.Context) *SelectStmt {
+	return &SelectStmt{scope: m, ctx: ctx}
 }
 
 var (
