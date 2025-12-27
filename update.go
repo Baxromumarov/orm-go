@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strconv"
-	"strings"
 )
 
 type UpdateStmt struct {
@@ -57,20 +55,16 @@ func (s *UpdateStmt) Exec() error {
 	if s.ctx == nil {
 		s.ctx = context.Background()
 	}
-	if s.scope == nil || s.scope.pool == nil {
-		return fmt.Errorf("db connection is nil")
-	}
-	if s.scope.table == "" {
-		s.scope.table = ParseTableName(s.scope.input)
-	}
-	if s.scope.table == "" {
-		return fmt.Errorf("table name is required")
+
+	if err := s.scope.validate(); err != nil {
+		return err
 	}
 
 	query, args, err := s.build()
 	if err != nil {
 		return fmt.Errorf("error building update query: %w", err)
 	}
+	fmt.Println("FINAL UPDATE QUERY:", query)
 
 	if len(s.returningCols) == 0 {
 		_, err = s.scope.pool.Exec(s.ctx, query, args...)
@@ -142,10 +136,12 @@ func (s *UpdateStmt) build() (string, []any, error) {
 		if len(s.scope.columns) != len(s.scope.values) {
 			return "", nil, fmt.Errorf("columns and values length mismatch")
 		}
+
 		for i, col := range s.scope.columns {
 			if i > 0 {
 				sb.sql.WriteString(", ")
 			}
+
 			sb.sql.WriteString(col)
 			sb.sql.WriteString(" = ")
 			sb.sql.WriteString(sb.Arg(s.scope.values[i]))
@@ -166,71 +162,4 @@ func (s *UpdateStmt) build() (string, []any, error) {
 	}
 
 	return sb.sql.String(), sb.args, nil
-}
-
-type Expr interface {
-	build(sb *sqlBuilder)
-}
-
-type sqlBuilder struct {
-	sql  strings.Builder
-	args []any
-}
-
-func (b *sqlBuilder) Arg(v any) string {
-	b.args = append(b.args, v)
-	return "$" + strconv.Itoa(len(b.args))
-}
-
-type eqExpr struct {
-	col string
-	val any
-}
-
-func Eq(col string, val any) Expr {
-	return eqExpr{col, val}
-}
-
-func (e eqExpr) build(b *sqlBuilder) {
-	b.sql.WriteString(e.col)
-	b.sql.WriteString(" = ")
-	b.sql.WriteString(b.Arg(e.val))
-}
-
-type andExpr struct {
-	exprs []Expr
-}
-
-func And(exprs ...Expr) Expr {
-	return andExpr{exprs}
-}
-
-func (e andExpr) build(b *sqlBuilder) {
-	b.sql.WriteString("(")
-	for i, ex := range e.exprs {
-		if i > 0 {
-			b.sql.WriteString(" AND ")
-		}
-		ex.build(b)
-	}
-	b.sql.WriteString(")")
-}
-
-type orExpr struct {
-	exprs []Expr
-}
-
-func Or(exprs ...Expr) Expr {
-	return orExpr{exprs}
-}
-
-func (e orExpr) build(b *sqlBuilder) {
-	b.sql.WriteString("(")
-	for i, ex := range e.exprs {
-		if i > 0 {
-			b.sql.WriteString(" OR ")
-		}
-		ex.build(b)
-	}
-	b.sql.WriteString(")")
 }

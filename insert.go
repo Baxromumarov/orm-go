@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 /*Insert
@@ -53,7 +54,7 @@ func (s *InsertStmt) AutoTableName() *InsertStmt {
 	if s.scope != nil {
 		s.scope.table = ParseTableName(s.scope.input)
 	}
-	
+
 	return s
 }
 
@@ -73,17 +74,12 @@ func (s *InsertStmt) Exec() error {
 	if s.ctx == nil {
 		s.ctx = context.Background()
 	}
-	if s.scope == nil || s.scope.pool == nil {
-		return fmt.Errorf("db connection is nil")
-	}
-	if s.scope.table == "" {
-		s.scope.table = ParseTableName(s.scope.input)
-	}
-	if s.scope.table == "" {
-		return fmt.Errorf("table name is required")
+
+	if err := s.scope.validate(); err != nil {
+		return err
 	}
 	if len(s.scope.columns) == 0 {
-		return fmt.Errorf("no columns to insert")
+		return ErrNoInsertCols
 	}
 
 	query, err := s.build()
@@ -134,35 +130,42 @@ func (s *InsertStmt) build() (string, error) {
 	if s.scope == nil {
 		return "", fmt.Errorf("model scope is nil")
 	}
+	q := strings.Builder{}
 
-	q := `INSERT INTO ` + s.scope.table + ` (`
+	q.WriteString(`INSERT INTO `)
+	q.WriteString(s.scope.table)
+	q.WriteString(` (`)
+
 	for i, col := range s.scope.columns {
 		if i > 0 {
-			q += ", "
+			q.WriteString(", ")
 
 		}
-		q += col
+		q.WriteString(col)
 
 	}
-	q += ") VALUES ("
+	q.WriteString(`) VALUES (`)
 	for i := range s.scope.columns {
 		if i > 0 {
-			q += ", "
+			q.WriteString(", ")
 		}
-		q += "$" + strconv.Itoa(i+1)
+		q.WriteString("$")
+		q.WriteString(strconv.Itoa(i + 1))
 	}
-	q += ")"
+
+	q.WriteString(")")
+
 	if len(s.returningCols) > 0 {
-		q += " RETURNING "
+		q.WriteString(" RETURNING ")
 		for i, ret := range s.returningCols {
 			if i > 0 {
-				q += ", "
+				q.WriteString(", ")
 			}
-			q += ret
+			q.WriteString(ret)
 		}
 	}
 
-	return q, nil
+	return q.String(), nil
 }
 
 func buildModelMeta(model any) *modelMeta {
