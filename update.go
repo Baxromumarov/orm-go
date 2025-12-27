@@ -88,27 +88,16 @@ func (s *UpdateStmt) Exec() error {
 		return nil
 	}
 
-	meta := buildModelMeta(s.scope.input)
+	meta := GetModelMeta(s.scope.input)
 
 	v := reflect.ValueOf(s.scope.input)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
 
-	scanArgs := make([]any, 0, len(s.returningCols))
-
-	for _, col := range s.returningCols {
-		fm, ok := meta.byColumn[col]
-		if !ok {
-			return fmt.Errorf("unknown returning column: %s", col)
-		}
-
-		field := v.Field(fm.index)
-		if !field.CanAddr() {
-			return fmt.Errorf("field %s is not addressable", col)
-		}
-
-		scanArgs = append(scanArgs, field.Addr().Interface())
+	scanArgs, err := ScanArgsForReturning(v, s.returningCols, meta)
+	if err != nil {
+		return err
 	}
 
 	if err := s.scope.pool.QueryRow(s.ctx, query, args...).Scan(scanArgs...); err != nil {
@@ -150,30 +139,12 @@ func (s *UpdateStmt) build() (string, []any, error) {
 		if len(s.scope.columns) != len(s.scope.values) {
 			return "", nil, fmt.Errorf("columns and values length mismatch")
 		}
-
-		for i, col := range s.scope.columns {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-
-			sb.sql.WriteString(col)
-			sb.sql.WriteString(" = ")
-			sb.sql.WriteString(sb.Arg(s.scope.values[i]))
-		}
+		sb.WriteSetClause(s.scope.columns, s.scope.values)
 	}
 
 	sb.sql.WriteString(" WHERE ")
 	s.where.build(sb)
-
-	if len(s.returningCols) > 0 {
-		sb.sql.WriteString(" RETURNING ")
-		for i, ret := range s.returningCols {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-			sb.sql.WriteString(ret)
-		}
-	}
+	sb.WriteReturning(s.returningCols)
 
 	return sb.sql.String(), sb.args, nil
 }

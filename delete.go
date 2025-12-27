@@ -77,27 +77,16 @@ func (ds *DeleteStmt) Exec() error {
 		return nil
 	}
 
-	meta := buildModelMeta(ds.scope.input)
+	meta := GetModelMeta(ds.scope.input)
 
 	v := reflect.ValueOf(ds.scope.input)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
 
-	scanArgs := make([]any, 0, len(ds.returningCols))
-
-	for _, col := range ds.returningCols {
-		fm, ok := meta.byColumn[col]
-		if !ok {
-			return fmt.Errorf("unknown returning column: %s", col)
-		}
-
-		field := v.Field(fm.index)
-		if !field.CanAddr() {
-			return fmt.Errorf("field %s is not addressable", col)
-		}
-
-		scanArgs = append(scanArgs, field.Addr().Interface())
+	scanArgs, err := ScanArgsForReturning(v, ds.returningCols, meta)
+	if err != nil {
+		return err
 	}
 
 	if err := ds.scope.pool.QueryRow(
@@ -133,16 +122,7 @@ func (ds *DeleteStmt) build() (string, []any, error) {
 	sb.sql.WriteString(" WHERE ")
 
 	ds.where.build(sb)
-
-	if len(ds.returningCols) > 0 {
-		sb.sql.WriteString(" RETURNING ")
-		for i, ret := range ds.returningCols {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-			sb.sql.WriteString(ret)
-		}
-	}
+	sb.WriteReturning(ds.returningCols)
 
 	return sb.sql.String(), sb.args, nil
 }
