@@ -114,3 +114,5 @@ orm.Or(orm.Eq("role", "admin"), orm.Eq("role", "owner"))
 - `AutoTableName` uses lower + snake_case + pluralization of the struct name.
 - Insert and struct-based Update skip zero-value fields. Use `Set(...)` for explicit zero updates.
 - `Select.One` returns `ErrNotFound` or `ErrMultipleRows` when appropriate.
+
+Note: it's still under development, might have issues
