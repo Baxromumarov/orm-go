@@ -42,6 +42,20 @@ err = db.Model(&user).
 	Exec()
 ```
 
+## Batch Insert
+
+```go
+users := []User{
+	{Name: "Ben", Balance: 100},
+	{Name: "Sara", Balance: 200},
+}
+err = db.Model(&users).
+	Insert(context.Background()).
+	AutoTableName().
+	Returning("id").
+	Exec()
+```
+
 ## Update
 
 ```go
@@ -63,6 +77,31 @@ err = db.Model(&user).
 	Where(orm.Eq("id", user.ID)).
 	Returning("id", "name").
 	Exec()
+```
+
+## Transactions
+
+```go
+err = db.Tx(context.Background(), func(tx *orm.Tx) error {
+	user := User{Name: "Ben", Balance: 100}
+	if err := tx.Model(&user).
+		Insert(context.Background()).
+		AutoTableName().
+		Exec(); err != nil {
+		return err
+	}
+
+	if err := tx.Model(&user).
+		Update(context.Background()).
+		Table("users").
+		Set("balance", 200).
+		Where(orm.Eq("id", user.ID)).
+		Exec(); err != nil {
+		return err
+	}
+
+	return nil
+})
 ```
 
 ## Select One
@@ -93,6 +132,16 @@ err = db.Model(&User{}).
 	Many(&users)
 ```
 
+## Count
+
+```go
+count, err := db.Model(&User{}).
+	Select(context.Background()).
+	Table("users").
+	Where(orm.Eq("active", true)).
+	Count()
+```
+
 ## Expressions
 
 ```go
@@ -104,6 +153,8 @@ orm.Or(orm.Eq("role", "admin"), orm.Eq("role", "owner"))
 ## Use Cases
 
 - Simple CRUD with `RETURNING` support.
+- Batch inserts from slices.
+- Transactions via `DB.Tx`.
 - Fetch single rows or lists with filters and pagination.
 - Map rows into structs or slices using `orm` tags.
 - Auto table naming from struct types.
@@ -113,6 +164,7 @@ orm.Or(orm.Eq("role", "admin"), orm.Eq("role", "owner"))
 - Tags use `orm:"column_name"`. Only tagged exported fields are considered.
 - `AutoTableName` uses lower + snake_case + pluralization of the struct name.
 - Insert and struct-based Update skip zero-value fields. Use `Set(...)` for explicit zero updates.
+- Batch inserts require a slice of structs; with `RETURNING` use a pointer to the slice.
 - `Select.One` returns `ErrNotFound` or `ErrMultipleRows` when appropriate.
 
 Note: it's still under development, might have issues

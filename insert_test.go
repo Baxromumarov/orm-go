@@ -194,6 +194,112 @@ func TestInsertStmtExecNoReturningError(t *testing.T) {
 	}
 }
 
+func TestInsertStmtExecBatchNoReturningSuccess(t *testing.T) {
+	pool := &stubPool{}
+	users := []User{
+		{Name: "a", Age: 10},
+		{Name: "b", Age: 20},
+	}
+	scope := &ModelScope{
+		pool:  pool,
+		input: &users,
+	}
+	stmt := &InsertStmt{scope: scope}
+
+	if err := stmt.Exec(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if scope.table != "users" {
+		t.Fatalf("expected table to be set, got %q", scope.table)
+	}
+	if pool.execQuery != "INSERT INTO users (name, age) VALUES ($1, $2), ($3, $4)" {
+		t.Fatalf("query mismatch: %q", pool.execQuery)
+	}
+	if !reflect.DeepEqual(pool.execArgs, []any{"a", 10, "b", 20}) {
+		t.Fatalf("args mismatch: %#v", pool.execArgs)
+	}
+}
+
+func TestInsertStmtExecBatchReturningSuccess(t *testing.T) {
+	pool := &stubPool{rows: newScriptedRows([][]any{{1}, {2}})}
+	users := []User{
+		{Name: "a"},
+		{Name: "b"},
+	}
+	scope := &ModelScope{
+		pool:  pool,
+		input: &users,
+	}
+	stmt := &InsertStmt{scope: scope}
+	stmt.Returning("id")
+
+	if err := stmt.Exec(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if users[0].ID != 1 || users[1].ID != 2 {
+		t.Fatalf("returning scan failed: %#v", users)
+	}
+	if pool.queryQuery != "INSERT INTO users (name) VALUES ($1), ($2) RETURNING id" {
+		t.Fatalf("query mismatch: %q", pool.queryQuery)
+	}
+	if !reflect.DeepEqual(pool.queryArgs, []any{"a", "b"}) {
+		t.Fatalf("args mismatch: %#v", pool.queryArgs)
+	}
+}
+
+func TestInsertStmtExecBatchEmpty(t *testing.T) {
+	pool := &stubPool{}
+	users := []User{}
+	scope := &ModelScope{
+		pool:  pool,
+		input: &users,
+		table: "users",
+	}
+	stmt := &InsertStmt{scope: scope}
+
+	if err := stmt.Exec(); err == nil || !errors.Is(err, ErrNoInsertRows) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInsertStmtExecBatchColumnMismatch(t *testing.T) {
+	pool := &stubPool{}
+	users := []User{
+		{Name: "a"},
+		{Age: 20},
+	}
+	scope := &ModelScope{
+		pool:  pool,
+		input: &users,
+		table: "users",
+	}
+	stmt := &InsertStmt{scope: scope}
+
+	err := stmt.Exec()
+	if err == nil || !strings.Contains(err.Error(), "insert columns mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInsertStmtExecBatchReturningRequiresPointer(t *testing.T) {
+	pool := &stubPool{rows: newScriptedRows([][]any{{1}})}
+	users := []User{
+		{Name: "a"},
+	}
+	scope := &ModelScope{
+		pool:  pool,
+		input: users,
+		table: "users",
+	}
+	stmt := &InsertStmt{scope: scope}
+	stmt.Returning("id")
+
+	err := stmt.Exec()
+	if err == nil || !strings.Contains(err.Error(), "pointer to slice") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestInsertStmtExecReturningUnknownColumn(t *testing.T) {
 	pool := &stubPool{}
 	user := &User{Name: "bob"}

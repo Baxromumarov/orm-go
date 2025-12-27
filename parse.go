@@ -86,7 +86,15 @@ func ParseTableName(input any) string {
 		return ""
 	}
 
-	t := reflect.TypeOf(input)
+	v := reflect.ValueOf(input)
+	if v.Kind() == reflect.Ptr && v.IsNil() {
+		return ""
+	}
+	if v.Kind() == reflect.Slice && v.IsNil() {
+		return ""
+	}
+
+	t := v.Type()
 
 	// 🔥 unwrap pointers, slices, arrays
 	for {
@@ -211,4 +219,8 @@ func snakeCase(input string) string {
 	// Collapse repeated underscores.
 	out = strings.Join(strings.FieldsFunc(out, func(r rune) bool { return r == '_' }), "_")
 	return out
+}
+
+func lower(input string) string {
+	return strings.ToLower(input)
 }

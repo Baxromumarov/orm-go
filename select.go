@@ -73,7 +73,7 @@ func (ss *SelectStmt) Columns(cols ...string) *SelectStmt {
 	return ss
 }
 
-// Join logic
+// Join adds a JOIN clause to the SELECT.
 func (ss *SelectStmt) Join(table string, joinType JoinType, on Expr) *SelectStmt {
 	ss.joins = append(ss.joins, joinClause{
 		typ:   joinType,
@@ -89,6 +89,7 @@ func (ss *SelectStmt) Where(expr Expr) *SelectStmt {
 	return ss
 }
 
+// Count executes a SELECT COUNT(*) with the current filters.
 func (ss *SelectStmt) Count() (int, error) {
 	if ss.ctx == nil {
 		ss.ctx = context.Background()
