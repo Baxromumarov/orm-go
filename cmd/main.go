@@ -28,31 +28,27 @@ func main() {
 	defer db.Close()
 
 	type User struct {
-		ID      int64  `orm:"id"`
-		Name    string `orm:"name"`
-		Balance int    `orm:"balance"`
+		ID      int64   `orm:"id"`
+		Name    *string `orm:"name"`
+		Balance *int    `orm:"balance"`
 	}
 
 	var user []User
-	c, err := db.Model(&user).
+	err = db.Model(&user).
 		Select(context.Background()).
-		Table("users").
-		Columns(
-			"id",
-			"name",
-		).
+		AutoTableName().
 		Where(
-			orm.Eq(
-				"name", "BEN",
+			orm.Or(
+				orm.Eq("name", "BEN"),
+				orm.Eq("id", 12),
 			),
 		).
-		Count()
-
+		Many(&user)
 	if err != nil {
 		fmt.Println(">>> Error:", err)
 		return
 	}
-	fmt.Println(">>> Count:", c)
+	fmt.Println(">>> Result:", user)
 	////  Delete
 	//err = db.Model(&user).
 	//	Delete(context.Background()).
@@ -101,7 +97,5 @@ func main() {
 	// 	fmt.Println(">>> Error:", err)
 	// 	return
 	// }
-
-	fmt.Println(">>> Result:", user)
 
 }

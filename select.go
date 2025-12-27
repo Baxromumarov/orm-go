@@ -83,7 +83,7 @@ func (ss *SelectStmt) Join(table string, joinType JoinType, on Expr) *SelectStmt
 	return ss
 }
 
-// Where sets the WHERE clause for the SELECT.
+// Where sets the WHERE clause for the SELECT, UPDATE and DELETE.
 func (ss *SelectStmt) Where(expr Expr) *SelectStmt {
 	ss.where = expr
 	return ss
@@ -170,7 +170,6 @@ func (ss *SelectStmt) One(dest any) error {
 		return err
 	}
 
-
 	meta := buildModelMeta(destType)
 	scanArgs, err := scanArgsForColumns(destVal, ss.scope.columns, meta)
 	if err != nil {
@@ -187,7 +186,6 @@ func (ss *SelectStmt) One(dest any) error {
 	if !rows.Next() {
 		return ErrNotFound
 	}
-
 	// Scan first row
 	if err := rows.Scan(scanArgs...); err != nil {
 		return err

@@ -86,22 +86,31 @@ func ParseTableName(input any) string {
 		return ""
 	}
 
-	v := reflect.ValueOf(input)
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return ""
+	t := reflect.TypeOf(input)
+
+	// 🔥 unwrap pointers, slices, arrays
+	for {
+		switch t.Kind() {
+		case reflect.Ptr, reflect.Slice, reflect.Array:
+			t = t.Elem()
+		default:
+			goto DONE
 		}
-		v = v.Elem()
 	}
 
-	if v.Kind() != reflect.Struct {
+DONE:
+	if t.Kind() != reflect.Struct {
 		return ""
 	}
-	t := v.Type().Name()
+
+	name := t.Name()
+	if name == "" {
+		return ""
+	}
 
 	return pluralize(
 		snakeCase(
-			lower(t),
+			strings.ToLower(name),
 		),
 	)
 }
@@ -202,8 +211,4 @@ func snakeCase(input string) string {
 	// Collapse repeated underscores.
 	out = strings.Join(strings.FieldsFunc(out, func(r rune) bool { return r == '_' }), "_")
 	return out
-}
-
-func lower(input string) string {
-	return strings.ToLower(input)
 }
