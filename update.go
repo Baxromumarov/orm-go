@@ -3,7 +3,6 @@ package orm_go
 import (
 	"context"
 	"fmt"
-	"reflect"
 )
 
 type UpdateStmt struct {
@@ -20,17 +19,13 @@ type setClause struct {
 
 // AutoTableName sets the table name based on the model type.
 func (s *UpdateStmt) AutoTableName() *UpdateStmt {
-	if s.scope != nil {
-		s.scope.table = ParseTableName(s.scope.input)
-	}
+	setAutoTableName(s.scope)
 	return s
 }
 
 // Table sets the table name explicitly for this UPDATE.
 func (s *UpdateStmt) Table(tableName string) *UpdateStmt {
-	if s.scope != nil {
-		s.scope.table = tableName
-	}
+	setTableName(s.scope, tableName)
 	return s
 }
 
@@ -52,7 +47,7 @@ func (s *UpdateStmt) Where(expr Expr) *UpdateStmt {
 
 // Returning adds a RETURNING clause and returns the statement for chaining.
 func (s *UpdateStmt) Returning(cols ...string) *UpdateStmt {
-	s.returningCols = append([]string(nil), cols...)
+	s.returningCols = cloneStrings(cols)
 	return s
 }
 
@@ -88,27 +83,9 @@ func (s *UpdateStmt) Exec() error {
 		return nil
 	}
 
-	meta := buildModelMeta(s.scope.input)
-
-	v := reflect.ValueOf(s.scope.input)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-
-	scanArgs := make([]any, 0, len(s.returningCols))
-
-	for _, col := range s.returningCols {
-		fm, ok := meta.byColumn[col]
-		if !ok {
-			return fmt.Errorf("unknown returning column: %s", col)
-		}
-
-		field := v.Field(fm.index)
-		if !field.CanAddr() {
-			return fmt.Errorf("field %s is not addressable", col)
-		}
-
-		scanArgs = append(scanArgs, field.Addr().Interface())
+	scanArgs, err := scanArgsForReturning(s.scope.input, s.returningCols)
+	if err != nil {
+		return err
 	}
 
 	if err := s.scope.pool.QueryRow(s.ctx, query, args...).Scan(scanArgs...); err != nil {
@@ -135,45 +112,46 @@ func (s *UpdateStmt) build() (string, []any, error) {
 	sb.sql.WriteString(" SET ")
 
 	if len(s.sets) > 0 {
-		for i, set := range s.sets {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-			sb.sql.WriteString(set.col)
-			sb.sql.WriteString(" = ")
-			sb.sql.WriteString(sb.Arg(set.val))
-		}
+		writeSetClauses(sb, s.sets)
 	} else {
-		if len(s.scope.columns) == 0 {
-			return "", nil, fmt.Errorf("no columns to update")
-		}
-		if len(s.scope.columns) != len(s.scope.values) {
-			return "", nil, fmt.Errorf("columns and values length mismatch")
-		}
-
-		for i, col := range s.scope.columns {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-
-			sb.sql.WriteString(col)
-			sb.sql.WriteString(" = ")
-			sb.sql.WriteString(sb.Arg(s.scope.values[i]))
+		if err := writeColumnAssignments(sb, s.scope.columns, s.scope.values); err != nil {
+			return "", nil, err
 		}
 	}
 
-	sb.sql.WriteString(" WHERE ")
-	s.where.build(sb)
-
-	if len(s.returningCols) > 0 {
-		sb.sql.WriteString(" RETURNING ")
-		for i, ret := range s.returningCols {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-			sb.sql.WriteString(ret)
-		}
-	}
+	appendWhereClause(sb, s.where)
+	writeReturning(&sb.sql, s.returningCols)
 
 	return sb.sql.String(), sb.args, nil
+}
+
+func writeSetClauses(sb *sqlBuilder, sets []setClause) {
+	for i, set := range sets {
+		if i > 0 {
+			sb.sql.WriteString(", ")
+		}
+		sb.sql.WriteString(set.col)
+		sb.sql.WriteString(" = ")
+		sb.sql.WriteString(sb.Arg(set.val))
+	}
+}
+
+func writeColumnAssignments(sb *sqlBuilder, columns []string, values []any) error {
+	if len(columns) == 0 {
+		return fmt.Errorf("no columns to update")
+	}
+	if len(columns) != len(values) {
+		return fmt.Errorf("columns and values length mismatch")
+	}
+
+	for i, col := range columns {
+		if i > 0 {
+			sb.sql.WriteString(", ")
+		}
+		sb.sql.WriteString(col)
+		sb.sql.WriteString(" = ")
+		sb.sql.WriteString(sb.Arg(values[i]))
+	}
+
+	return nil
 }

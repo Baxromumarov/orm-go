@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 )
 
 type DeleteStmt struct {
@@ -27,17 +26,13 @@ var _ Delete = (*DeleteStmt)(nil)
 
 // AutoTableName sets the table name based on the model type.
 func (ds *DeleteStmt) AutoTableName() *DeleteStmt {
-	if ds.scope != nil {
-		ds.scope.table = ParseTableName(ds.scope.input)
-	}
+	setAutoTableName(ds.scope)
 	return ds
 }
 
 // Table sets the table name explicitly for this DELETE.
 func (ds *DeleteStmt) Table(tableName string) *DeleteStmt {
-	if ds.scope != nil {
-		ds.scope.table = tableName
-	}
+	setTableName(ds.scope, tableName)
 
 	return ds
 }
@@ -50,7 +45,7 @@ func (ds *DeleteStmt) Where(expr Expr) *DeleteStmt {
 
 // Returning adds a RETURNING clause and returns the statement for chaining.
 func (ds *DeleteStmt) Returning(cols ...string) *DeleteStmt {
-	ds.returningCols = append([]string(nil), cols...)
+	ds.returningCols = cloneStrings(cols)
 	return ds
 }
 
@@ -77,27 +72,9 @@ func (ds *DeleteStmt) Exec() error {
 		return nil
 	}
 
-	meta := buildModelMeta(ds.scope.input)
-
-	v := reflect.ValueOf(ds.scope.input)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-
-	scanArgs := make([]any, 0, len(ds.returningCols))
-
-	for _, col := range ds.returningCols {
-		fm, ok := meta.byColumn[col]
-		if !ok {
-			return fmt.Errorf("unknown returning column: %s", col)
-		}
-
-		field := v.Field(fm.index)
-		if !field.CanAddr() {
-			return fmt.Errorf("field %s is not addressable", col)
-		}
-
-		scanArgs = append(scanArgs, field.Addr().Interface())
+	scanArgs, err := scanArgsForReturning(ds.scope.input, ds.returningCols)
+	if err != nil {
+		return err
 	}
 
 	if err := ds.scope.pool.QueryRow(
@@ -130,19 +107,8 @@ func (ds *DeleteStmt) build() (string, []any, error) {
 	sb := &sqlBuilder{}
 	sb.sql.WriteString("DELETE FROM ")
 	sb.sql.WriteString(ds.scope.table)
-	sb.sql.WriteString(" WHERE ")
-
-	ds.where.build(sb)
-
-	if len(ds.returningCols) > 0 {
-		sb.sql.WriteString(" RETURNING ")
-		for i, ret := range ds.returningCols {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-			sb.sql.WriteString(ret)
-		}
-	}
+	appendWhereClause(sb, ds.where)
+	writeReturning(&sb.sql, ds.returningCols)
 
 	return sb.sql.String(), sb.args, nil
 }

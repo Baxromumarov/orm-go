@@ -35,7 +35,7 @@ func TestInsertStmtReturningCopies(t *testing.T) {
 
 func TestInsertStmtBuild(t *testing.T) {
 	stmt := &InsertStmt{}
-	if _, err := stmt.build(); err == nil || err.Error() != "model scope is nil" {
+	if _, _, err := stmt.build(); err == nil || err.Error() != "model scope is nil" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -44,7 +44,7 @@ func TestInsertStmtBuild(t *testing.T) {
 		scope:         scope,
 		returningCols: []string{"id", "name"},
 	}
-	got, err := stmt.build()
+	got, _, err := stmt.build()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

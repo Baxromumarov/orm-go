@@ -25,7 +25,7 @@ func BenchmarkInsertBuild(b *testing.B) {
 	stmt := &InsertStmt{scope: scope}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, _ = stmt.build()
+		_, _, _ = stmt.build()
 	}
 }
 
@@ -38,7 +38,7 @@ func BenchmarkInsertBuildReturning(b *testing.B) {
 	stmt.Returning("id", "name")
 	b.ReportAllocs()
 	for b.Loop() {
-		_, _ = stmt.build()
+		_, _, _ = stmt.build()
 	}
 }
 

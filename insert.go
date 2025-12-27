@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"strconv"
 	"strings"
 )
 
@@ -39,38 +38,24 @@ type InsertStmt struct {
 	returningCols []string
 }
 
-type fieldMeta struct {
-	index  int
-	column string
-}
-
-type modelMeta struct {
-	byColumn map[string]fieldMeta
-}
-
 // ErrNoInsertRows is returned when a batch insert receives an empty slice.
 var ErrNoInsertRows = errors.New("orm: no rows to insert")
 
 // AutoTableName sets the table name based on the model type.
 func (s *InsertStmt) AutoTableName() *InsertStmt {
-	if s.scope != nil {
-		s.scope.table = ParseTableName(s.scope.input)
-	}
-
+	setAutoTableName(s.scope)
 	return s
 }
 
 // Table sets the table name explicitly for this INSERT.
 func (s *InsertStmt) Table(tableName string) *InsertStmt {
-	if s.scope != nil {
-		s.scope.table = tableName
-	}
+	setTableName(s.scope, tableName)
 	return s
 }
 
 // Returning adds a RETURNING clause and returns the statement for chaining.
 func (s *InsertStmt) Returning(cols ...string) *InsertStmt {
-	s.returningCols = append([]string(nil), cols...)
+	s.returningCols = cloneStrings(cols)
 	return s
 }
 
@@ -103,44 +88,26 @@ func (s *InsertStmt) Exec() error {
 		return ErrNoInsertCols
 	}
 
-	query, err := s.build()
+	query, args, err := s.build()
 	if err != nil {
 		return fmt.Errorf("error building query: %w", err)
 	}
 
 	// No RETURNING requested \-\> Exec (no row to scan).
 	if len(s.returningCols) == 0 {
-		_, err = s.scope.pool.Exec(s.ctx, query, s.scope.values...)
+		_, err = s.scope.pool.Exec(s.ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("error executing query: %w", err)
 		}
 		return nil
 	}
 
-	var meta = buildModelMeta(s.scope.input)
-	var v = reflect.ValueOf(s.scope.input)
-
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
+	scanArgs, err := scanArgsForReturning(s.scope.input, s.returningCols)
+	if err != nil {
+		return err
 	}
 
-	scanArgs := make([]any, 0, len(s.returningCols))
-
-	for _, col := range s.returningCols {
-		fm, ok := meta.byColumn[col]
-		if !ok {
-			return fmt.Errorf("unknown returning column: %s", col)
-		}
-
-		field := v.Field(fm.index)
-		if !field.CanAddr() {
-			return fmt.Errorf("field %s is not addressable", col)
-		}
-
-		scanArgs = append(scanArgs, field.Addr().Interface())
-	}
-
-	if err := s.scope.pool.QueryRow(s.ctx, query, s.scope.values...).Scan(scanArgs...); err != nil {
+	if err := s.scope.pool.QueryRow(s.ctx, query, args...).Scan(scanArgs...); err != nil {
 		return fmt.Errorf("error executing query with returning: %w", err)
 	}
 
@@ -207,7 +174,7 @@ func (s *InsertStmt) execBatch() error {
 			return err
 		}
 
-		scanArgs, err := scanArgsForReturning(target, s.returningCols, meta)
+		scanArgs, err := scanArgsForColumnsValue(target, s.returningCols, meta, "unknown returning column: %s")
 		if err != nil {
 			return err
 		}
@@ -227,9 +194,9 @@ func (s *InsertStmt) execBatch() error {
 	return nil
 }
 
-func (s *InsertStmt) build() (string, error) {
+func (s *InsertStmt) build() (string, []any, error) {
 	if s.scope == nil {
-		return "", fmt.Errorf("model scope is nil")
+		return "", nil, fmt.Errorf("model scope is nil")
 	}
 	q := strings.Builder{}
 
@@ -237,36 +204,13 @@ func (s *InsertStmt) build() (string, error) {
 	q.WriteString(s.scope.table)
 	q.WriteString(` (`)
 
-	for i, col := range s.scope.columns {
-		if i > 0 {
-			q.WriteString(", ")
+	writeIdentList(&q, s.scope.columns)
+	q.WriteString(`) VALUES `)
+	writePlaceholderGroup(&q, len(s.scope.columns), 1)
 
-		}
-		q.WriteString(col)
+	writeReturning(&q, s.returningCols)
 
-	}
-	q.WriteString(`) VALUES (`)
-	for i := range s.scope.columns {
-		if i > 0 {
-			q.WriteString(", ")
-		}
-		q.WriteString("$")
-		q.WriteString(strconv.Itoa(i + 1))
-	}
-
-	q.WriteString(")")
-
-	if len(s.returningCols) > 0 {
-		q.WriteString(" RETURNING ")
-		for i, ret := range s.returningCols {
-			if i > 0 {
-				q.WriteString(", ")
-			}
-			q.WriteString(ret)
-		}
-	}
-
-	return q.String(), nil
+	return q.String(), s.scope.values, nil
 }
 
 func inferTableNameFromInput(input any) string {
@@ -394,12 +338,7 @@ func buildBatchInsertQuery(table string, cols []string, rows int, returning []st
 	b.WriteString("INSERT INTO ")
 	b.WriteString(table)
 	b.WriteString(" (")
-	for i, col := range cols {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(col)
-	}
+	writeIdentList(&b, cols)
 	b.WriteString(") VALUES ")
 
 	argPos := 1
@@ -407,27 +346,10 @@ func buildBatchInsertQuery(table string, cols []string, rows int, returning []st
 		if r > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString("(")
-		for c := range cols {
-			if c > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString("$")
-			b.WriteString(strconv.Itoa(argPos))
-			argPos++
-		}
-		b.WriteString(")")
+		argPos = writePlaceholderGroup(&b, len(cols), argPos)
 	}
 
-	if len(returning) > 0 {
-		b.WriteString(" RETURNING ")
-		for i, ret := range returning {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString(ret)
-		}
-	}
+	writeReturning(&b, returning)
 
 	return b.String()
 }
@@ -449,66 +371,4 @@ func batchScanTarget(slice reflect.Value, index int, elemIsPtr bool, sliceSettab
 		return reflect.Value{}, errors.New("batch insert with returning requires a pointer to slice")
 	}
 	return elem, nil
-}
-
-func scanArgsForReturning(v reflect.Value, cols []string, meta *modelMeta) ([]any, error) {
-	scanArgs := make([]any, 0, len(cols))
-	for _, col := range cols {
-		fm, ok := meta.byColumn[col]
-		if !ok {
-			return nil, fmt.Errorf("unknown returning column: %s", col)
-		}
-
-		field := v.Field(fm.index)
-		if !field.CanAddr() {
-			return nil, fmt.Errorf("field %s is not addressable", col)
-		}
-
-		scanArgs = append(scanArgs, field.Addr().Interface())
-	}
-	return scanArgs, nil
-}
-
-func buildModelMeta(model any) *modelMeta {
-	meta := &modelMeta{
-		byColumn: make(map[string]fieldMeta),
-	}
-
-	var t reflect.Type
-	switch v := model.(type) {
-	case reflect.Type:
-		t = v
-	default:
-		if model == nil {
-			return meta
-		}
-		t = reflect.TypeOf(model)
-	}
-
-	// unwrap pointers
-	for t != nil && t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-
-	if t == nil || t.Kind() != reflect.Struct {
-		return meta
-	}
-
-	for i := 0; i < t.NumField(); i++ {
-		sf := t.Field(i)
-
-		raw := sf.Tag.Get(TagKey)
-		if raw == "" {
-			continue
-		}
-
-		col := strings.Split(raw, ",")[0]
-
-		meta.byColumn[col] = fieldMeta{
-			index:  i,
-			column: col,
-		}
-	}
-
-	return meta
 }

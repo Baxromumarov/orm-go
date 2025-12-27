@@ -52,24 +52,20 @@ var _ Select = (*SelectStmt)(nil)
 
 // AutoTableName sets the table name based on the model type.
 func (ss *SelectStmt) AutoTableName() *SelectStmt {
-	if ss.scope != nil {
-		ss.scope.table = ParseTableName(ss.scope.input)
-	}
+	setAutoTableName(ss.scope)
 	return ss
 }
 
 // Table sets the table name explicitly for this SELECT.
 func (ss *SelectStmt) Table(tableName string) *SelectStmt {
-	if ss.scope != nil {
-		ss.scope.table = tableName
-	}
+	setTableName(ss.scope, tableName)
 
 	return ss
 }
 
 // Columns sets the column list for the SELECT.
 func (ss *SelectStmt) Columns(cols ...string) *SelectStmt {
-	ss.scope.columns = append([]string(nil), cols...)
+	ss.scope.columns = cloneStrings(cols)
 	return ss
 }
 
@@ -126,8 +122,7 @@ func (ss *SelectStmt) Count() (int, error) {
 	}
 
 	if ss.where != nil {
-		sb.sql.WriteString(" WHERE ")
-		ss.where.build(sb)
+		appendWhereClause(sb, ss.where)
 	}
 
 	query := sb.sql.String()
@@ -172,7 +167,7 @@ func (ss *SelectStmt) One(dest any) error {
 	}
 
 	meta := buildModelMeta(destType)
-	scanArgs, err := scanArgsForColumns(destVal, ss.scope.columns, meta)
+	scanArgs, err := scanArgsForColumnsValue(destVal, ss.scope.columns, meta, "unknown column: %s")
 	if err != nil {
 		return err
 	}
@@ -250,7 +245,7 @@ func (ss *SelectStmt) Many(dest any) error {
 			target = elem.Elem()
 		}
 
-		scanArgs, err := scanArgsForColumns(target, ss.scope.columns, meta)
+		scanArgs, err := scanArgsForColumnsValue(target, ss.scope.columns, meta, "unknown column: %s")
 		if err != nil {
 			return err
 		}
@@ -305,12 +300,7 @@ func (ss *SelectStmt) build() (string, []any, error) {
 	if len(ss.scope.columns) == 0 {
 		sb.sql.WriteString("*")
 	} else {
-		for i, col := range ss.scope.columns {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-			sb.sql.WriteString(col)
-		}
+		writeIdentList(&sb.sql, ss.scope.columns)
 	}
 
 	sb.sql.WriteString(" FROM ")
@@ -340,8 +330,7 @@ func (ss *SelectStmt) build() (string, []any, error) {
 	}
 
 	if ss.where != nil {
-		sb.sql.WriteString(" WHERE ")
-		ss.where.build(sb)
+		appendWhereClause(sb, ss.where)
 	}
 
 	if ss.limit != nil {
@@ -416,51 +405,6 @@ func validateManyDest(dest any) (reflect.Value, reflect.Type, bool, error) {
 	}
 
 	return v, elemType, elemIsPtr, nil
-}
-
-func columnsFromType(t reflect.Type) []string {
-	for t != nil && t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	if t == nil || t.Kind() != reflect.Struct {
-		return nil
-	}
-
-	cols := make([]string, 0, t.NumField())
-	for i := 0; i < t.NumField(); i++ {
-		sf := t.Field(i)
-		if sf.PkgPath != "" {
-			continue
-		}
-		raw := sf.Tag.Get(TagKey)
-		if raw == "" {
-			continue
-		}
-		col := strings.Split(raw, ",")[0]
-		if col == "" {
-			continue
-		}
-		cols = append(cols, col)
-	}
-	return cols
-}
-
-func scanArgsForColumns(v reflect.Value, columns []string, meta *modelMeta) ([]any, error) {
-	scanArgs := make([]any, 0, len(columns))
-	for _, col := range columns {
-		fm, ok := meta.byColumn[col]
-		if !ok {
-			return nil, fmt.Errorf("unknown column: %s", col)
-		}
-
-		field := v.Field(fm.index)
-		if !field.CanAddr() {
-			return nil, fmt.Errorf("field %s is not addressable", col)
-		}
-
-		scanArgs = append(scanArgs, field.Addr().Interface())
-	}
-	return scanArgs, nil
 }
 
 func validateQualifiedColumns(columns []string) error {

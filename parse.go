@@ -17,23 +17,23 @@ func ParseInsertColumns(model any) ([]string, []any) {
 	}
 	t := v.Type()
 
+	if v.Kind() != reflect.Struct {
+		_ = v.NumField()
+		return nil, nil
+	}
+
+	meta := modelMetaForType(t)
 	var cols []string
 	var vals []any
 
-	for i := 0; i < v.NumField(); i++ {
-		fv := v.Field(i)
-		sf := t.Field(i)
-
-		tag := sf.Tag.Get(TagKey)
-		if tag == "" {
-			continue
-		}
+	for _, fm := range meta.fields {
+		fv := v.Field(fm.index)
 
 		if fv.IsZero() {
 			continue
 		}
 
-		cols = append(cols, tag)
+		cols = append(cols, fm.rawTag)
 		vals = append(vals, fv.Interface())
 	}
 
@@ -43,40 +43,14 @@ func ParseInsertColumns(model any) ([]string, []any) {
 // ParseTags returns the \`orm\` struct tags for exported fields in the given input.
 // It supports structs and pointers to structs. For unsupported or nil inputs it returns nil.
 func ParseTags(input any) []string {
-	if input == nil {
+	t, ok := structTypeFromInput(input)
+	if !ok {
 		return nil
 	}
 
-	v := reflect.ValueOf(input)
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return nil
-		}
-		v = v.Elem()
-	}
-
-	if v.Kind() != reflect.Struct {
-		return nil
-	}
-
-	t := v.Type()
-	out := make([]string, 0, t.NumField())
-
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-
-		if f.PkgPath != "" {
-			continue
-		}
-
-		tag := f.Tag.Get(TagKey)
-		if tag == "" {
-			continue
-		}
-
-		out = append(out, tag)
-	}
-
+	meta := modelMetaForType(t)
+	out := make([]string, len(meta.exportedTags))
+	copy(out, meta.exportedTags)
 	return out
 }
 
