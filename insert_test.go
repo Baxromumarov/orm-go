@@ -154,6 +154,29 @@ func TestInsertStmtExecNoReturningSuccess(t *testing.T) {
 	}
 }
 
+func TestInsertStmtExecAutoTableAndColumns(t *testing.T) {
+	pool := &stubPool{}
+	user := &User{Name: "bob", Age: 30}
+	scope := &ModelScope{
+		pool:  pool,
+		input: user,
+	}
+	stmt := &InsertStmt{scope: scope}
+
+	if err := stmt.Exec(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if scope.table != "users" {
+		t.Fatalf("expected table to be set, got %q", scope.table)
+	}
+	if pool.execQuery != "INSERT INTO users (name, age) VALUES ($1, $2)" {
+		t.Fatalf("exec query mismatch: %q", pool.execQuery)
+	}
+	if !reflect.DeepEqual(pool.execArgs, []any{"bob", 30}) {
+		t.Fatalf("exec args mismatch: %#v", pool.execArgs)
+	}
+}
+
 func TestInsertStmtExecNoReturningError(t *testing.T) {
 	execErr := errors.New("exec fail")
 	pool := &stubPool{execErr: execErr}

@@ -34,7 +34,7 @@ func main() {
 	}
 
 	var user []User
-	err = db.Model(&user).
+	c, err := db.Model(&user).
 		Select(context.Background()).
 		Table("users").
 		Columns(
@@ -46,16 +46,13 @@ func main() {
 				"name", "BEN",
 			),
 		).
-		Limit(2).
-		Offset(0).
-		Many(&user)
+		Count()
 
 	if err != nil {
 		fmt.Println(">>> Error:", err)
 		return
 	}
-	fmt.Println(">>> User:", user)
-
+	fmt.Println(">>> Count:", c)
 	////  Delete
 	//err = db.Model(&user).
 	//	Delete(context.Background()).

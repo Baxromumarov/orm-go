@@ -79,7 +79,6 @@ func (s *UpdateStmt) Exec() error {
 	if err != nil {
 		return fmt.Errorf("error building update query: %w", err)
 	}
-	fmt.Println("FINAL UPDATE QUERY:", query)
 
 	if len(s.returningCols) == 0 {
 		_, err = s.scope.pool.Exec(s.ctx, query, args...)

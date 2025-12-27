@@ -13,7 +13,23 @@ type SelectStmt struct {
 	ctx   context.Context
 	where Expr
 	pagination
+	joins []joinClause
 }
+type JoinType string
+
+const (
+	Inner    JoinType = "INNER"
+	Left     JoinType = "LEFT"
+	Right    JoinType = "RIGHT"
+	FullJoin JoinType = "FULL"
+)
+
+type joinClause struct {
+	typ   JoinType
+	table string
+	on    Expr
+}
+
 type pagination struct {
 	limit  *int
 	offset *int
@@ -23,6 +39,7 @@ type Select interface {
 	AutoTableName() *SelectStmt
 	Table(tableName string) *SelectStmt
 	Columns(cols ...string) *SelectStmt
+	Count() (int, error)
 	One(dest any) error
 	Many(dest any) error
 	Where(expr Expr) *SelectStmt
@@ -56,11 +73,70 @@ func (ss *SelectStmt) Columns(cols ...string) *SelectStmt {
 	return ss
 }
 
+// Join logic
+func (ss *SelectStmt) Join(table string, joinType JoinType, on Expr) *SelectStmt {
+	ss.joins = append(ss.joins, joinClause{
+		typ:   joinType,
+		table: table,
+		on:    on,
+	})
+	return ss
+}
+
 // Where sets the WHERE clause for the SELECT.
 func (ss *SelectStmt) Where(expr Expr) *SelectStmt {
-	fmt.Println("<<< ", ss)
 	ss.where = expr
 	return ss
+}
+
+func (ss *SelectStmt) Count() (int, error) {
+	if ss.ctx == nil {
+		ss.ctx = context.Background()
+	}
+
+	if err := ss.scope.validate(); err != nil {
+		return 0, err
+	}
+	sb := &sqlBuilder{}
+	sb.sql.WriteString("SELECT COUNT(*) FROM ")
+	sb.sql.WriteString(ss.scope.table)
+
+	if len(ss.joins) > 0 {
+		if err := validateQualifiedColumns(ss.scope.columns); err != nil {
+			return 0, err
+		}
+		if err := validateExprQualified(ss.where); err != nil {
+			return 0, err
+		}
+		for _, j := range ss.joins {
+			if err := validateExprQualified(j.on); err != nil {
+				return 0, err
+			}
+		}
+	}
+
+	for _, j := range ss.joins {
+		sb.sql.WriteString(" ")
+		sb.sql.WriteString(string(j.typ))
+		sb.sql.WriteString(" JOIN ")
+		sb.sql.WriteString(j.table)
+		sb.sql.WriteString(" ON ")
+		j.on.build(sb)
+	}
+
+	if ss.where != nil {
+		sb.sql.WriteString(" WHERE ")
+		ss.where.build(sb)
+	}
+
+	query := sb.sql.String()
+	args := sb.args
+	var count int
+	err := ss.scope.pool.QueryRow(ss.ctx, query, args...).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 var (
@@ -94,9 +170,6 @@ func (ss *SelectStmt) One(dest any) error {
 		return err
 	}
 
-	fmt.Println("FINAL SELECT QUERY:", query)
-	fmt.Println("FINAL SELECT ARGS:", args)
-	fmt.Println(">>>>>>>>>>>>> ", ss)
 
 	meta := buildModelMeta(destType)
 	scanArgs, err := scanArgsForColumns(destVal, ss.scope.columns, meta)
@@ -157,9 +230,6 @@ func (ss *SelectStmt) Many(dest any) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("FINAL SELECT QUERY:", query)
-	fmt.Println("FINAL SELECT ARGS:", args)
-	fmt.Println(">>>>>>>>>>>>> ", ss.scope.columns)
 
 	rows, err := ss.scope.pool.Query(ss.ctx, query, args...)
 	if err != nil {
@@ -247,6 +317,29 @@ func (ss *SelectStmt) build() (string, []any, error) {
 	sb.sql.WriteString(" FROM ")
 	sb.sql.WriteString(ss.scope.table)
 
+	if len(ss.joins) > 0 {
+		if err := validateQualifiedColumns(ss.scope.columns); err != nil {
+			return "", nil, err
+		}
+		if err := validateExprQualified(ss.where); err != nil {
+			return "", nil, err
+		}
+		for _, j := range ss.joins {
+			if err := validateExprQualified(j.on); err != nil {
+				return "", nil, err
+			}
+		}
+	}
+
+	for _, j := range ss.joins {
+		sb.sql.WriteString(" ")
+		sb.sql.WriteString(string(j.typ))
+		sb.sql.WriteString(" JOIN ")
+		sb.sql.WriteString(j.table)
+		sb.sql.WriteString(" ON ")
+		j.on.build(sb)
+	}
+
 	if ss.where != nil {
 		sb.sql.WriteString(" WHERE ")
 		ss.where.build(sb)
@@ -262,6 +355,26 @@ func (ss *SelectStmt) build() (string, []any, error) {
 	}
 
 	return sb.sql.String(), sb.args, nil
+}
+
+func columnIsUnqualified(col string) bool {
+	col = strings.TrimSpace(col)
+	if col == "" {
+		return false
+	}
+	if strings.Contains(col, ".") {
+		return false
+	}
+	for _, r := range col {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateOneDest(dest any) (reflect.Value, reflect.Type, error) {
@@ -349,4 +462,40 @@ func scanArgsForColumns(v reflect.Value, columns []string, meta *modelMeta) ([]a
 		scanArgs = append(scanArgs, field.Addr().Interface())
 	}
 	return scanArgs, nil
+}
+
+func validateQualifiedColumns(columns []string) error {
+	for _, col := range columns {
+		if columnIsUnqualified(col) {
+			return fmt.Errorf("ambiguous column: %s", col)
+		}
+	}
+	return nil
+}
+
+func validateExprQualified(expr Expr) error {
+	if expr == nil {
+		return nil
+	}
+
+	switch e := expr.(type) {
+	case eqExpr:
+		if columnIsUnqualified(e.col) {
+			return fmt.Errorf("ambiguous column: %s", e.col)
+		}
+	case andExpr:
+		for _, ex := range e.exprs {
+			if err := validateExprQualified(ex); err != nil {
+				return err
+			}
+		}
+	case orExpr:
+		for _, ex := range e.exprs {
+			if err := validateExprQualified(ex); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }

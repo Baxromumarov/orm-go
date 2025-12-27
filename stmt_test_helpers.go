@@ -102,6 +102,48 @@ func (r *stubRows) Values() ([]any, error) { return nil, nil }
 func (r *stubRows) RawValues() [][]byte    { return nil }
 func (r *stubRows) Conn() *pgx.Conn        { return nil }
 
+type scriptedRows struct {
+	values  [][]any
+	idx     int
+	err     error
+	scanErr error
+}
+
+func newScriptedRows(values [][]any) *scriptedRows {
+	return &scriptedRows{values: values, idx: -1}
+}
+
+func (r *scriptedRows) Close()                        {}
+func (r *scriptedRows) Err() error                    { return r.err }
+func (r *scriptedRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+func (r *scriptedRows) FieldDescriptions() []pgconn.FieldDescription {
+	return nil
+}
+func (r *scriptedRows) Next() bool {
+	if r.idx+1 >= len(r.values) {
+		return false
+	}
+	r.idx++
+	return true
+}
+func (r *scriptedRows) Scan(dest ...any) error {
+	if r.scanErr != nil {
+		return r.scanErr
+	}
+	if r.idx < 0 || r.idx >= len(r.values) {
+		return fmt.Errorf("scan out of range")
+	}
+	return stubRow{values: r.values[r.idx]}.Scan(dest...)
+}
+func (r *scriptedRows) Values() ([]any, error) {
+	if r.idx < 0 || r.idx >= len(r.values) {
+		return nil, nil
+	}
+	return r.values[r.idx], nil
+}
+func (r *scriptedRows) RawValues() [][]byte { return nil }
+func (r *scriptedRows) Conn() *pgx.Conn     { return nil }
+
 type stubBatchResults struct{}
 
 func (b *stubBatchResults) Exec() (pgconn.CommandTag, error) { return pgconn.CommandTag{}, nil }

@@ -1,4 +1,6 @@
-.PHONY: test
+.PHONY: all test
+
+all: test
 
 test:
-	go test ./...
+	go test -v ./...

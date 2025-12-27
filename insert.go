@@ -29,10 +29,7 @@ Example usage:
 		"balance",
 	).Exec()
 
-	if err != nil {
-		fmt.Println(">>> Error:", err)
-		return
-	}
+	
 */
 
 type InsertStmt struct {

@@ -68,8 +68,6 @@ func (ds *DeleteStmt) Exec() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("FINAL DELETE QUERY:", query)
-	fmt.Println("ARGS:", args)
 
 	if len(ds.returningCols) == 0 {
 		_, err = ds.scope.pool.Exec(ds.ctx, query, args...)

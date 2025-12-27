@@ -1,7 +1,6 @@
 package orm_go
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"unicode"
@@ -98,7 +97,6 @@ func ParseTableName(input any) string {
 	if v.Kind() != reflect.Struct {
 		return ""
 	}
-	fmt.Println("here>> ", v.Type().String())
 	t := v.Type().Name()
 
 	return pluralize(
@@ -207,6 +205,5 @@ func snakeCase(input string) string {
 }
 
 func lower(input string) string {
-	fmt.Println("lower:", input)
 	return strings.ToLower(input)
 }
