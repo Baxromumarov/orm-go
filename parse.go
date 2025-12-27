@@ -10,6 +10,7 @@ import (
 
 const TagKey = "orm"
 
+// ParseInsertColumns returns non-zero struct fields tagged with `orm` as columns and values.
 func ParseInsertColumns(model any) ([]string, []any) {
 	v := reflect.ValueOf(model)
 	if v.Kind() == reflect.Ptr {
@@ -80,6 +81,7 @@ func ParseTags(input any) []string {
 	return out
 }
 
+// ParseTableName derives a table name from a struct type (lower + snake_case + pluralize).
 func ParseTableName(input any) string {
 	if input == nil {
 		return ""

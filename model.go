@@ -13,6 +13,7 @@ type ModelScope struct {
 	input   any
 }
 
+// Model creates a scope for building statements around a model value.
 func (db *DB) Model(model any) *ModelScope {
 	var pool pooler
 	if db.conn != nil {
@@ -25,15 +26,22 @@ func (db *DB) Model(model any) *ModelScope {
 	}
 }
 
+// Insert starts an INSERT statement for this model.
 func (m *ModelScope) Insert(ctx context.Context) *InsertStmt {
 	return &InsertStmt{scope: m, ctx: ctx}
 }
+
+// Update starts an UPDATE statement for this model.
 func (m *ModelScope) Update(ctx context.Context) *UpdateStmt {
 	return &UpdateStmt{scope: m, ctx: ctx}
 }
+
+// Delete starts a DELETE statement for this model.
 func (m *ModelScope) Delete(ctx context.Context) *DeleteStmt {
 	return &DeleteStmt{scope: m, ctx: ctx}
 }
+
+// Select starts a SELECT statement for this model.
 func (m *ModelScope) Select(ctx context.Context) *SelectStmt {
 	return &SelectStmt{scope: m, ctx: ctx}
 }

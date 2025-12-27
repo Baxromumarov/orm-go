@@ -24,6 +24,7 @@ type eqExpr struct {
 	val any
 }
 
+// Eq builds a "col = value" expression.
 func Eq(col string, val any) Expr {
 	return eqExpr{col, val}
 }
@@ -38,6 +39,7 @@ type andExpr struct {
 	exprs []Expr
 }
 
+// And combines expressions with AND.
 func And(exprs ...Expr) Expr {
 	return andExpr{exprs}
 }
@@ -57,6 +59,7 @@ type orExpr struct {
 	exprs []Expr
 }
 
+// Or combines expressions with OR.
 func Or(exprs ...Expr) Expr {
 	return orExpr{exprs}
 }

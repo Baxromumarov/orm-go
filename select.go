@@ -33,6 +33,7 @@ type Select interface {
 
 var _ Select = (*SelectStmt)(nil)
 
+// AutoTableName sets the table name based on the model type.
 func (ss *SelectStmt) AutoTableName() *SelectStmt {
 	if ss.scope != nil {
 		ss.scope.table = ParseTableName(ss.scope.input)
@@ -40,6 +41,7 @@ func (ss *SelectStmt) AutoTableName() *SelectStmt {
 	return ss
 }
 
+// Table sets the table name explicitly for this SELECT.
 func (ss *SelectStmt) Table(tableName string) *SelectStmt {
 	if ss.scope != nil {
 		ss.scope.table = tableName
@@ -47,11 +49,14 @@ func (ss *SelectStmt) Table(tableName string) *SelectStmt {
 
 	return ss
 }
+
+// Columns sets the column list for the SELECT.
 func (ss *SelectStmt) Columns(cols ...string) *SelectStmt {
 	ss.scope.columns = append([]string(nil), cols...)
 	return ss
 }
 
+// Where sets the WHERE clause for the SELECT.
 func (ss *SelectStmt) Where(expr Expr) *SelectStmt {
 	fmt.Println("<<< ", ss)
 	ss.where = expr
@@ -63,6 +68,7 @@ var (
 	ErrMultipleRows = errors.New("orm: more than one row returned. For multiple rows, use Many()")
 )
 
+// One executes the SELECT and scans a single row into dest.
 func (ss *SelectStmt) One(dest any) error {
 	if ss.ctx == nil {
 		ss.ctx = context.Background()
@@ -126,6 +132,7 @@ func (ss *SelectStmt) One(dest any) error {
 	return nil
 }
 
+// Many executes the SELECT and scans rows into dest (a slice pointer).
 func (ss *SelectStmt) Many(dest any) error {
 	if ss.ctx == nil {
 		ss.ctx = context.Background()
@@ -197,11 +204,13 @@ func (ss *SelectStmt) Many(dest any) error {
 	return nil
 }
 
+// Limit sets a LIMIT for the SELECT.
 func (ss *SelectStmt) Limit(limit int) *SelectStmt {
 	ss.limit = &limit
 	return ss
 }
 
+// Offset sets an OFFSET for the SELECT.
 func (ss *SelectStmt) Offset(offset int) *SelectStmt {
 	ss.offset = &offset
 	return ss

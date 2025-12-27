@@ -50,6 +50,7 @@ type modelMeta struct {
 	byColumn map[string]fieldMeta
 }
 
+// AutoTableName sets the table name based on the model type.
 func (s *InsertStmt) AutoTableName() *InsertStmt {
 	if s.scope != nil {
 		s.scope.table = ParseTableName(s.scope.input)
@@ -58,6 +59,7 @@ func (s *InsertStmt) AutoTableName() *InsertStmt {
 	return s
 }
 
+// Table sets the table name explicitly for this INSERT.
 func (s *InsertStmt) Table(tableName string) *InsertStmt {
 	if s.scope != nil {
 		s.scope.table = tableName
@@ -65,11 +67,13 @@ func (s *InsertStmt) Table(tableName string) *InsertStmt {
 	return s
 }
 
+// Returning adds a RETURNING clause and returns the statement for chaining.
 func (s *InsertStmt) Returning(cols ...string) *InsertStmt {
 	s.returningCols = append([]string(nil), cols...)
 	return s
 }
 
+// Exec builds and executes the INSERT statement.
 func (s *InsertStmt) Exec() error {
 	if s.ctx == nil {
 		s.ctx = context.Background()

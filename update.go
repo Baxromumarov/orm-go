@@ -18,6 +18,7 @@ type setClause struct {
 	val any
 }
 
+// AutoTableName sets the table name based on the model type.
 func (s *UpdateStmt) AutoTableName() *UpdateStmt {
 	if s.scope != nil {
 		s.scope.table = ParseTableName(s.scope.input)
@@ -25,6 +26,7 @@ func (s *UpdateStmt) AutoTableName() *UpdateStmt {
 	return s
 }
 
+// Table sets the table name explicitly for this UPDATE.
 func (s *UpdateStmt) Table(tableName string) *UpdateStmt {
 	if s.scope != nil {
 		s.scope.table = tableName
@@ -32,6 +34,7 @@ func (s *UpdateStmt) Table(tableName string) *UpdateStmt {
 	return s
 }
 
+// Set adds a column assignment for the UPDATE.
 func (s *UpdateStmt) Set(col string, val any) *UpdateStmt {
 	s.sets = append(s.sets, setClause{
 		col: col,
@@ -41,16 +44,19 @@ func (s *UpdateStmt) Set(col string, val any) *UpdateStmt {
 	return s
 }
 
+// Where sets the WHERE clause for the UPDATE.
 func (s *UpdateStmt) Where(expr Expr) *UpdateStmt {
 	s.where = expr
 	return s
 }
 
+// Returning adds a RETURNING clause and returns the statement for chaining.
 func (s *UpdateStmt) Returning(cols ...string) *UpdateStmt {
 	s.returningCols = append([]string(nil), cols...)
 	return s
 }
 
+// Exec builds and executes the UPDATE statement.
 func (s *UpdateStmt) Exec() error {
 	if s.ctx == nil {
 		s.ctx = context.Background()

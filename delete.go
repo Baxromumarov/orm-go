@@ -25,6 +25,7 @@ type Delete interface {
 
 var _ Delete = (*DeleteStmt)(nil)
 
+// AutoTableName sets the table name based on the model type.
 func (ds *DeleteStmt) AutoTableName() *DeleteStmt {
 	if ds.scope != nil {
 		ds.scope.table = ParseTableName(ds.scope.input)
@@ -32,6 +33,7 @@ func (ds *DeleteStmt) AutoTableName() *DeleteStmt {
 	return ds
 }
 
+// Table sets the table name explicitly for this DELETE.
 func (ds *DeleteStmt) Table(tableName string) *DeleteStmt {
 	if ds.scope != nil {
 		ds.scope.table = tableName
@@ -40,16 +42,19 @@ func (ds *DeleteStmt) Table(tableName string) *DeleteStmt {
 	return ds
 }
 
+// Where sets the WHERE clause for the DELETE.
 func (ds *DeleteStmt) Where(expr Expr) *DeleteStmt {
 	ds.where = expr
 	return ds
 }
 
+// Returning adds a RETURNING clause and returns the statement for chaining.
 func (ds *DeleteStmt) Returning(cols ...string) *DeleteStmt {
 	ds.returningCols = append([]string(nil), cols...)
 	return ds
 }
 
+// Exec builds and executes the DELETE statement.
 func (ds *DeleteStmt) Exec() error {
 	if ds.ctx == nil {
 		ds.ctx = context.Background()
