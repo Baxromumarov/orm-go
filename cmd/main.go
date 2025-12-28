@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	orm "github.com/baxromumarov/orm-go"
@@ -28,27 +29,32 @@ func main() {
 	defer db.Close()
 
 	type User struct {
-		ID      int64   `orm:"id"`
-		Name    *string `orm:"name"`
-		Balance *int    `orm:"balance"`
+		ID      int64         `orm:"id"`
+		Name    string        `orm:"name"`
+		Balance sql.NullInt64 `orm:"balance"`
 	}
 
-	var user []User
+	var user User
 	err = db.Model(&user).
 		Select(context.Background()).
 		AutoTableName().
-		Where(
-			orm.Or(
-				orm.Eq("name", "BEN"),
-				orm.Eq("id", 12),
-			),
+		Columns(
+			"id",
+			"name",
+			"balance",
 		).
-		Many(&user)
+		Where(
+			orm.Eq("name", "BEN"),
+		).
+		Limit(1).
+		One(&user)
 	if err != nil {
 		fmt.Println(">>> Error:", err)
 		return
 	}
-	fmt.Println(">>> Result:", user)
+
+	fmt.Println(">>> User:", user)
+
 	////  Delete
 	//err = db.Model(&user).
 	//	Delete(context.Background()).

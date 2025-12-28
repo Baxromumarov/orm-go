@@ -7,26 +7,46 @@ import (
 	"reflect"
 )
 
-type DeleteStmt struct {
+// DeleteBuilder is Stage 1: Must set table first.
+type DeleteBuilder interface {
+	Table(name string) DeleteBuilderWithTable
+	AutoTableName() DeleteBuilderWithTable
+}
+
+// DeleteBuilderWithTable is Stage 2: Table is set, MUST set WHERE clause next.
+// WHERE is required to prevent accidental full-table deletions.
+type DeleteBuilderWithTable interface {
+	Where(expr Expr) DeleteBuilderReady
+}
+
+// DeleteBuilderReady is Stage 3: WHERE is set, can add options or execute.
+type DeleteBuilderReady interface {
+	Returning(cols ...string) DeleteBuilderReady
+	Exec() error
+}
+
+// deleteBuilder is the unexported concrete builder implementing all delete stages.
+type deleteBuilder struct {
 	scope         *ModelScope
 	ctx           context.Context
 	where         Expr
 	returningCols []string
 }
 
-type Delete interface {
-	AutoTableName() *DeleteStmt
-	Table(tableName string) *DeleteStmt
-	Where(expr Expr) *DeleteStmt
-	Returning(cols ...string) *DeleteStmt
-	Exec() error
-	build() (string, []any, error)
-}
+// Ensure deleteBuilder implements all interfaces at compile time.
+var (
+	_ DeleteBuilder          = (*deleteBuilder)(nil)
+	_ DeleteBuilderWithTable = (*deleteBuilder)(nil)
+	_ DeleteBuilderReady     = (*deleteBuilder)(nil)
+)
 
-var _ Delete = (*DeleteStmt)(nil)
+// DeleteStmt is a type alias for backward compatibility.
+// Deprecated: Use DeleteBuilder/DeleteBuilderWithTable/DeleteBuilderReady interfaces instead.
+type DeleteStmt = deleteBuilder
 
 // AutoTableName sets the table name based on the model type.
-func (ds *DeleteStmt) AutoTableName() *DeleteStmt {
+// Implements DeleteBuilder interface, returns DeleteBuilderWithTable.
+func (ds *deleteBuilder) AutoTableName() DeleteBuilderWithTable {
 	if ds.scope != nil {
 		ds.scope.table = ParseTableName(ds.scope.input)
 	}
@@ -34,7 +54,8 @@ func (ds *DeleteStmt) AutoTableName() *DeleteStmt {
 }
 
 // Table sets the table name explicitly for this DELETE.
-func (ds *DeleteStmt) Table(tableName string) *DeleteStmt {
+// Implements DeleteBuilder interface, returns DeleteBuilderWithTable.
+func (ds *deleteBuilder) Table(tableName string) DeleteBuilderWithTable {
 	if ds.scope != nil {
 		ds.scope.table = tableName
 	}
@@ -43,19 +64,22 @@ func (ds *DeleteStmt) Table(tableName string) *DeleteStmt {
 }
 
 // Where sets the WHERE clause for the DELETE.
-func (ds *DeleteStmt) Where(expr Expr) *DeleteStmt {
+// Implements DeleteBuilderWithTable interface, returns DeleteBuilderReady.
+func (ds *deleteBuilder) Where(expr Expr) DeleteBuilderReady {
 	ds.where = expr
 	return ds
 }
 
 // Returning adds a RETURNING clause and returns the statement for chaining.
-func (ds *DeleteStmt) Returning(cols ...string) *DeleteStmt {
+// Implements DeleteBuilderReady interface.
+func (ds *deleteBuilder) Returning(cols ...string) DeleteBuilderReady {
 	ds.returningCols = append([]string(nil), cols...)
 	return ds
 }
 
 // Exec builds and executes the DELETE statement.
-func (ds *DeleteStmt) Exec() error {
+// Implements DeleteBuilderReady interface.
+func (ds *deleteBuilder) Exec() error {
 	if ds.ctx == nil {
 		ds.ctx = context.Background()
 	}
@@ -107,7 +131,7 @@ var (
 	ErrMissingWhereClause = errors.New("orm: DELETE statements must have a WHERE clause to prevent accidental full-table deletions")
 )
 
-func (ds *DeleteStmt) build() (string, []any, error) {
+func (ds *deleteBuilder) build() (string, []any, error) {
 
 	if ds.scope == nil {
 		return "", nil, ErrNilScope

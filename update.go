@@ -6,20 +6,60 @@ import (
 	"reflect"
 )
 
-type UpdateStmt struct {
+// UpdateBuilder is Stage 1: Must set table first.
+type UpdateBuilder interface {
+	Table(name string) UpdateBuilderWithTable
+	AutoTableName() UpdateBuilderWithTable
+}
+
+// UpdateBuilderWithTable is Stage 2: Table is set, must set values next.
+type UpdateBuilderWithTable interface {
+	Set(col string, val any) UpdateBuilderWithValues
+	SetAll() UpdateBuilderWithValues // use all model fields
+}
+
+// UpdateBuilderWithValues is Stage 3: Values are set, MUST set WHERE clause next.
+// Can add more Set calls, or proceed to Where.
+type UpdateBuilderWithValues interface {
+	Set(col string, val any) UpdateBuilderWithValues
+	Where(expr Expr) UpdateBuilderReady
+}
+
+// UpdateBuilderReady is Stage 4: WHERE is set, can add options or execute.
+type UpdateBuilderReady interface {
+	Returning(cols ...string) UpdateBuilderReady
+	Exec() error
+}
+
+// updateBuilder is the unexported concrete builder implementing all update stages.
+type updateBuilder struct {
 	scope         *ModelScope
 	ctx           context.Context
 	sets          []setClause
 	where         Expr
 	returningCols []string
 }
+
 type setClause struct {
 	col string
 	val any
 }
 
+// Ensure updateBuilder implements all interfaces at compile time.
+var (
+	_ UpdateBuilder           = (*updateBuilder)(nil)
+	_ UpdateBuilderWithTable  = (*updateBuilder)(nil)
+	_ UpdateBuilderWithValues = (*updateBuilder)(nil)
+	_ UpdateBuilderReady      = (*updateBuilder)(nil)
+)
+
+// UpdateStmt is a type alias for backward compatibility.
+// Deprecated: Use UpdateBuilder/UpdateBuilderWithTable/UpdateBuilderWithValues/UpdateBuilderReady interfaces instead.
+type UpdateStmt = updateBuilder
+
 // AutoTableName sets the table name based on the model type.
-func (s *UpdateStmt) AutoTableName() *UpdateStmt {
+// Implements UpdateBuilder interface, returns UpdateBuilderWithTable.
+func (s *updateBuilder) AutoTableName() UpdateBuilderWithTable {
 	if s.scope != nil {
 		s.scope.table = ParseTableName(s.scope.input)
 	}
@@ -27,7 +67,8 @@ func (s *UpdateStmt) AutoTableName() *UpdateStmt {
 }
 
 // Table sets the table name explicitly for this UPDATE.
-func (s *UpdateStmt) Table(tableName string) *UpdateStmt {
+// Implements UpdateBuilder interface, returns UpdateBuilderWithTable.
+func (s *updateBuilder) Table(tableName string) UpdateBuilderWithTable {
 	if s.scope != nil {
 		s.scope.table = tableName
 	}
@@ -35,7 +76,8 @@ func (s *UpdateStmt) Table(tableName string) *UpdateStmt {
 }
 
 // Set adds a column assignment for the UPDATE.
-func (s *UpdateStmt) Set(col string, val any) *UpdateStmt {
+// Implements UpdateBuilderWithTable and UpdateBuilderWithValues interfaces.
+func (s *updateBuilder) Set(col string, val any) UpdateBuilderWithValues {
 	s.sets = append(s.sets, setClause{
 		col: col,
 		val: val,
@@ -44,20 +86,32 @@ func (s *UpdateStmt) Set(col string, val any) *UpdateStmt {
 	return s
 }
 
+// SetAll uses all model fields for the update.
+// Implements UpdateBuilderWithTable interface, returns UpdateBuilderWithValues.
+func (s *updateBuilder) SetAll() UpdateBuilderWithValues {
+	if s.scope != nil && s.scope.input != nil {
+		s.scope.columns, s.scope.values = ParseInsertColumns(s.scope.input)
+	}
+	return s
+}
+
 // Where sets the WHERE clause for the UPDATE.
-func (s *UpdateStmt) Where(expr Expr) *UpdateStmt {
+// Implements UpdateBuilderWithValues interface, returns UpdateBuilderReady.
+func (s *updateBuilder) Where(expr Expr) UpdateBuilderReady {
 	s.where = expr
 	return s
 }
 
 // Returning adds a RETURNING clause and returns the statement for chaining.
-func (s *UpdateStmt) Returning(cols ...string) *UpdateStmt {
+// Implements UpdateBuilderReady interface.
+func (s *updateBuilder) Returning(cols ...string) UpdateBuilderReady {
 	s.returningCols = append([]string(nil), cols...)
 	return s
 }
 
 // Exec builds and executes the UPDATE statement.
-func (s *UpdateStmt) Exec() error {
+// Implements UpdateBuilderReady interface.
+func (s *updateBuilder) Exec() error {
 	if s.ctx == nil {
 		s.ctx = context.Background()
 	}
@@ -107,7 +161,7 @@ func (s *UpdateStmt) Exec() error {
 	return nil
 }
 
-func (s *UpdateStmt) build() (string, []any, error) {
+func (s *updateBuilder) build() (string, []any, error) {
 	if s.scope == nil {
 		return "", nil, fmt.Errorf("model scope is nil")
 	}
