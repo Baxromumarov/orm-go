@@ -171,8 +171,8 @@ func (ss *SelectStmt) One(dest any) error {
 		return err
 	}
 
-	meta := buildModelMeta(destType)
-	scanArgs, err := scanArgsForColumns(destVal, ss.scope.columns, meta)
+	meta := GetModelMeta(destType)
+	scanArgs, err := ScanArgsForColumns(destVal, ss.scope.columns, meta)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (ss *SelectStmt) Many(dest any) error {
 	}
 	defer rows.Close()
 
-	meta := buildModelMeta(elemType)
+	meta := GetModelMeta(elemType)
 
 	for rows.Next() {
 		var elem reflect.Value
@@ -250,7 +250,7 @@ func (ss *SelectStmt) Many(dest any) error {
 			target = elem.Elem()
 		}
 
-		scanArgs, err := scanArgsForColumns(target, ss.scope.columns, meta)
+		scanArgs, err := ScanArgsForColumns(target, ss.scope.columns, meta)
 		if err != nil {
 			return err
 		}
@@ -305,12 +305,7 @@ func (ss *SelectStmt) build() (string, []any, error) {
 	if len(ss.scope.columns) == 0 {
 		sb.sql.WriteString("*")
 	} else {
-		for i, col := range ss.scope.columns {
-			if i > 0 {
-				sb.sql.WriteString(", ")
-			}
-			sb.sql.WriteString(col)
-		}
+		sb.WriteColumnList(ss.scope.columns)
 	}
 
 	sb.sql.WriteString(" FROM ")
@@ -445,23 +440,7 @@ func columnsFromType(t reflect.Type) []string {
 	return cols
 }
 
-func scanArgsForColumns(v reflect.Value, columns []string, meta *modelMeta) ([]any, error) {
-	scanArgs := make([]any, 0, len(columns))
-	for _, col := range columns {
-		fm, ok := meta.byColumn[col]
-		if !ok {
-			return nil, fmt.Errorf("unknown column: %s", col)
-		}
-
-		field := v.Field(fm.index)
-		if !field.CanAddr() {
-			return nil, fmt.Errorf("field %s is not addressable", col)
-		}
-
-		scanArgs = append(scanArgs, field.Addr().Interface())
-	}
-	return scanArgs, nil
-}
+// scanArgsForColumns is now in metadata.go as ScanArgsForColumns
 
 func validateQualifiedColumns(columns []string) error {
 	for _, col := range columns {

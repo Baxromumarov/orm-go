@@ -63,19 +63,19 @@ func TestBuildModelMeta(t *testing.T) {
 		Empty   string `orm:""`
 	}
 
-	meta := buildModelMeta(&MetaUser{})
-	if _, ok := meta.byColumn["id"]; !ok {
+	meta := GetModelMeta(&MetaUser{})
+	if _, ok := meta.ByColumn["id"]; !ok {
 		t.Fatalf("missing id column")
 	}
-	if _, ok := meta.byColumn["name"]; !ok {
+	if _, ok := meta.ByColumn["name"]; !ok {
 		t.Fatalf("missing name column")
 	}
-	if _, ok := meta.byColumn["ignored"]; ok {
+	if _, ok := meta.ByColumn["ignored"]; ok {
 		t.Fatalf("unexpected ignored column")
 	}
 
-	metaValue := buildModelMeta(MetaUser{})
-	if _, ok := metaValue.byColumn["id"]; !ok {
+	metaValue := GetModelMeta(MetaUser{})
+	if _, ok := metaValue.ByColumn["id"]; !ok {
 		t.Fatalf("missing id column for value")
 	}
 }
