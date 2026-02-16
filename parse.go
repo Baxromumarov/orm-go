@@ -96,7 +96,6 @@ func ParseTableName(input any) string {
 
 	t := v.Type()
 
-	// 🔥 unwrap pointers, slices, arrays
 	for {
 		switch t.Kind() {
 		case reflect.Ptr, reflect.Slice, reflect.Array:
