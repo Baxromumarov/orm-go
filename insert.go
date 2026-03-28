@@ -33,11 +33,34 @@ Example usage:
 
 */
 
-type InsertStmt struct {
+// InsertBuilder is Stage 1: Must set table first.
+type InsertBuilder interface {
+	Table(name string) InsertBuilderWithTable
+	AutoTableName() InsertBuilderWithTable
+}
+
+// InsertBuilderWithTable is Stage 2: Table is set, can add options or execute.
+type InsertBuilderWithTable interface {
+	Returning(cols ...string) InsertBuilderWithTable
+	Exec() error
+}
+
+// insertBuilder is the unexported concrete builder implementing all insert stages.
+type insertBuilder struct {
 	scope         *ModelScope
 	ctx           context.Context
 	returningCols []string
 }
+
+// Ensure insertBuilder implements all interfaces at compile time.
+var (
+	_ InsertBuilder          = (*insertBuilder)(nil)
+	_ InsertBuilderWithTable = (*insertBuilder)(nil)
+)
+
+// InsertStmt is a type alias for backward compatibility.
+// Deprecated: Use InsertBuilder/InsertBuilderWithTable interfaces instead.
+type InsertStmt = insertBuilder
 
 // fieldMeta and modelMeta types are now in metadata.go as FieldMeta and ModelMeta.
 
@@ -45,7 +68,8 @@ type InsertStmt struct {
 var ErrNoInsertRows = errors.New("orm: no rows to insert")
 
 // AutoTableName sets the table name based on the model type.
-func (s *InsertStmt) AutoTableName() *InsertStmt {
+// Implements InsertBuilder interface, returns InsertBuilderWithTable.
+func (s *insertBuilder) AutoTableName() InsertBuilderWithTable {
 	if s.scope != nil {
 		s.scope.table = ParseTableName(s.scope.input)
 	}
@@ -54,7 +78,8 @@ func (s *InsertStmt) AutoTableName() *InsertStmt {
 }
 
 // Table sets the table name explicitly for this INSERT.
-func (s *InsertStmt) Table(tableName string) *InsertStmt {
+// Implements InsertBuilder interface, returns InsertBuilderWithTable.
+func (s *insertBuilder) Table(tableName string) InsertBuilderWithTable {
 	if s.scope != nil {
 		s.scope.table = tableName
 	}
@@ -62,13 +87,15 @@ func (s *InsertStmt) Table(tableName string) *InsertStmt {
 }
 
 // Returning adds a RETURNING clause and returns the statement for chaining.
-func (s *InsertStmt) Returning(cols ...string) *InsertStmt {
+// Implements InsertBuilderWithTable interface.
+func (s *insertBuilder) Returning(cols ...string) InsertBuilderWithTable {
 	s.returningCols = append([]string(nil), cols...)
 	return s
 }
 
 // Exec builds and executes the INSERT statement.
-func (s *InsertStmt) Exec() error {
+// Implements InsertBuilderWithTable interface.
+func (s *insertBuilder) Exec() error {
 	if s.ctx == nil {
 		s.ctx = context.Background()
 	}
@@ -128,7 +155,7 @@ func (s *InsertStmt) Exec() error {
 	return nil
 }
 
-func (s *InsertStmt) execBatch() error {
+func (s *insertBuilder) execBatch() error {
 	if s.ctx == nil {
 		s.ctx = context.Background()
 	}
@@ -208,7 +235,7 @@ func (s *InsertStmt) execBatch() error {
 	return nil
 }
 
-func (s *InsertStmt) build() (string, error) {
+func (s *insertBuilder) build() (string, error) {
 	if s.scope == nil {
 		return "", fmt.Errorf("model scope is nil")
 	}

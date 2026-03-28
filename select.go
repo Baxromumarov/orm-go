@@ -8,13 +8,33 @@ import (
 	"strings"
 )
 
-type SelectStmt struct {
+// SelectBuilder is Stage 1: Must set table first.
+type SelectBuilder interface {
+	Table(name string) SelectBuilderWithTable
+	AutoTableName() SelectBuilderWithTable
+}
+
+// SelectBuilderWithTable is Stage 2: Table is set, can add filters/options or execute.
+type SelectBuilderWithTable interface {
+	Columns(cols ...string) SelectBuilderWithTable
+	Where(expr Expr) SelectBuilderWithTable
+	Join(table string, joinType JoinType, on Expr) SelectBuilderWithTable
+	Limit(n int) SelectBuilderWithTable
+	Offset(n int) SelectBuilderWithTable
+	One(dest any) error
+	Many(dest any) error
+	Count() (int, error)
+}
+
+// selectBuilder is the unexported concrete builder implementing all select stages.
+type selectBuilder struct {
 	scope *ModelScope
 	ctx   context.Context
 	where Expr
 	pagination
 	joins []joinClause
 }
+
 type JoinType string
 
 const (
@@ -35,23 +55,19 @@ type pagination struct {
 	offset *int
 }
 
-type Select interface {
-	AutoTableName() *SelectStmt
-	Table(tableName string) *SelectStmt
-	Columns(cols ...string) *SelectStmt
-	Count() (int, error)
-	One(dest any) error
-	Many(dest any) error
-	Where(expr Expr) *SelectStmt
-	Limit(limit int) *SelectStmt
-	Offset(offset int) *SelectStmt
-	build() (string, []any, error)
-}
+// Ensure selectBuilder implements all interfaces at compile time.
+var (
+	_ SelectBuilder          = (*selectBuilder)(nil)
+	_ SelectBuilderWithTable = (*selectBuilder)(nil)
+)
 
-var _ Select = (*SelectStmt)(nil)
+// SelectStmt is a type alias for backward compatibility.
+// Deprecated: Use SelectBuilder/SelectBuilderWithTable interfaces instead.
+type SelectStmt = selectBuilder
 
 // AutoTableName sets the table name based on the model type.
-func (ss *SelectStmt) AutoTableName() *SelectStmt {
+// Implements SelectBuilder interface, returns SelectBuilderWithTable.
+func (ss *selectBuilder) AutoTableName() SelectBuilderWithTable {
 	if ss.scope != nil {
 		ss.scope.table = ParseTableName(ss.scope.input)
 	}
@@ -59,7 +75,8 @@ func (ss *SelectStmt) AutoTableName() *SelectStmt {
 }
 
 // Table sets the table name explicitly for this SELECT.
-func (ss *SelectStmt) Table(tableName string) *SelectStmt {
+// Implements SelectBuilder interface, returns SelectBuilderWithTable.
+func (ss *selectBuilder) Table(tableName string) SelectBuilderWithTable {
 	if ss.scope != nil {
 		ss.scope.table = tableName
 	}
@@ -68,13 +85,15 @@ func (ss *SelectStmt) Table(tableName string) *SelectStmt {
 }
 
 // Columns sets the column list for the SELECT.
-func (ss *SelectStmt) Columns(cols ...string) *SelectStmt {
+// Implements SelectBuilderWithTable interface.
+func (ss *selectBuilder) Columns(cols ...string) SelectBuilderWithTable {
 	ss.scope.columns = append([]string(nil), cols...)
 	return ss
 }
 
 // Join adds a JOIN clause to the SELECT.
-func (ss *SelectStmt) Join(table string, joinType JoinType, on Expr) *SelectStmt {
+// Implements SelectBuilderWithTable interface.
+func (ss *selectBuilder) Join(table string, joinType JoinType, on Expr) SelectBuilderWithTable {
 	ss.joins = append(ss.joins, joinClause{
 		typ:   joinType,
 		table: table,
@@ -83,14 +102,16 @@ func (ss *SelectStmt) Join(table string, joinType JoinType, on Expr) *SelectStmt
 	return ss
 }
 
-// Where sets the WHERE clause for the SELECT, UPDATE and DELETE.
-func (ss *SelectStmt) Where(expr Expr) *SelectStmt {
+// Where sets the WHERE clause for the SELECT.
+// Implements SelectBuilderWithTable interface.
+func (ss *selectBuilder) Where(expr Expr) SelectBuilderWithTable {
 	ss.where = expr
 	return ss
 }
 
 // Count executes a SELECT COUNT(*) with the current filters.
-func (ss *SelectStmt) Count() (int, error) {
+// Implements SelectBuilderWithTable interface.
+func (ss *selectBuilder) Count() (int, error) {
 	if ss.ctx == nil {
 		ss.ctx = context.Background()
 	}
@@ -146,7 +167,8 @@ var (
 )
 
 // One executes the SELECT and scans a single row into dest.
-func (ss *SelectStmt) One(dest any) error {
+// Implements SelectBuilderWithTable interface.
+func (ss *selectBuilder) One(dest any) error {
 	if ss.ctx == nil {
 		ss.ctx = context.Background()
 	}
@@ -205,7 +227,8 @@ func (ss *SelectStmt) One(dest any) error {
 }
 
 // Many executes the SELECT and scans rows into dest (a slice pointer).
-func (ss *SelectStmt) Many(dest any) error {
+// Implements SelectBuilderWithTable interface.
+func (ss *selectBuilder) Many(dest any) error {
 	if ss.ctx == nil {
 		ss.ctx = context.Background()
 	}
@@ -274,13 +297,15 @@ func (ss *SelectStmt) Many(dest any) error {
 }
 
 // Limit sets a LIMIT for the SELECT.
-func (ss *SelectStmt) Limit(limit int) *SelectStmt {
+// Implements SelectBuilderWithTable interface.
+func (ss *selectBuilder) Limit(limit int) SelectBuilderWithTable {
 	ss.limit = &limit
 	return ss
 }
 
 // Offset sets an OFFSET for the SELECT.
-func (ss *SelectStmt) Offset(offset int) *SelectStmt {
+// Implements SelectBuilderWithTable interface.
+func (ss *selectBuilder) Offset(offset int) SelectBuilderWithTable {
 	ss.offset = &offset
 	return ss
 }
@@ -290,7 +315,7 @@ SELECT * FROM users WHERE id = 12;
 
 SELECT id, name FROM users WHERE id = 12;
 */
-func (ss *SelectStmt) build() (string, []any, error) {
+func (ss *selectBuilder) build() (string, []any, error) {
 	if ss.ctx == nil {
 		ss.ctx = context.Background()
 	}

@@ -76,7 +76,7 @@ func TestUpdateStmtBuildWithSetsAndReturning(t *testing.T) {
 		scope: &ModelScope{table: "users"},
 		where: And(Eq("id", 1), Eq("active", true)),
 	}
-	stmt.Set("name", "bob").Set("age", 30).Returning("id", "name")
+	stmt.Set("name", "bob").Set("age", 30).Where(And(Eq("id", 1), Eq("active", true))).Returning("id", "name")
 
 	got, args, err := stmt.build()
 	if err != nil {
